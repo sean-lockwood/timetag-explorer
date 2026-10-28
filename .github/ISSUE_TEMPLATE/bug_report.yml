@@ -1,0 +1,22 @@
+name: Bug report
+description: The code raises an error or behaves in a way that is clearly not intended.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include the full error message, if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can it be reproduced?
+      description: A few lines of Python, and the exposure rootname if it needs real data.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Package version, Python version and operating system

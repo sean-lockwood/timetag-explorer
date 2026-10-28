@@ -1,0 +1,32 @@
+name: Science question or concern
+description: Something in the calculations looks wrong, or you would like to know why it is done this way.
+labels: [science]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. The steps are listed in VALIDATION.md in the repository; naming the step helps a lot.
+  - type: input
+    id: step
+    attributes:
+      label: Which step?
+      description: A row of the table in VALIDATION.md, or a module and function.
+    validations:
+      required: true
+  - type: textarea
+    id: concern
+    attributes:
+      label: What looks wrong, or what would you like to understand?
+      description: What did you expect, and why? An equation, a handbook page or a reference file is ideal.
+    validations:
+      required: true
+  - type: input
+    id: exposure
+    attributes:
+      label: Exposure
+      description: The HST rootname (for example OFAP44G5Q), if a particular exposure shows it.
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      description: "`python -c \"import timetag_explorer; print(timetag_explorer.__version__)\"`"

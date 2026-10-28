@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Request access to the web app
+    url: https://explorer.planetarylightshow.com/about
+    about: Access to the hosted app is by invitation; the front page says how to ask. Issues here are about the code.

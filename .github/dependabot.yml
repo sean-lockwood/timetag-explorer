@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # The actions used by the workflows. (The package's own dependencies are lower bounds in pyproject.toml, so there
+  # is nothing for Dependabot to update there; the weekly audit watches them for known vulnerabilities.)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "timetag-explorer"
+dynamic = ["version"]
+description = "The science code behind TIME-TAG Explorer: HST/STIS FUV TIME-TAG processing, reference frames, planet maps and selection scripts"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+authors = [{ name = "Sean Lockwood" }]
+keywords = ["astronomy", "HST", "STIS", "TIME-TAG", "FUV", "aurora"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+    "numpy>=2.0",
+    "astropy>=7.0",
+    "matplotlib>=3.9",      # only for its point-in-polygon test
+    "astroquery>=0.4.10",   # JPL Horizons, for the planet frames and maps
+]
+
+[project.urls]
+Homepage = "https://explorer.planetarylightshow.com"
+Documentation = "https://explorer.planetarylightshow.com/docs"
+Repository = "https://github.com/sean-lockwood/timetag-explorer.git"
+Issues = "https://github.com/sean-lockwood/timetag-explorer/issues"
+Changelog = "https://github.com/sean-lockwood/timetag-explorer/blob/main/CHANGELOG.md"
+
+[tool.setuptools.dynamic]
+version = { attr = "timetag_explorer.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["timetag_explorer*"]
