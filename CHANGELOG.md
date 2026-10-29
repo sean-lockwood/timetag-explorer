@@ -13,7 +13,7 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
-## [1.1.0] - Unreleased
+## [1.1.0] - 2026-10-29
 
 **Selection scripts (`SELECTION_SCRIPT_VERSION` 1.1) write a different file: no computed number changes.**
 
