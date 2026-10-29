@@ -32,5 +32,22 @@ for time_sel, region, frame, corr in cases:
         assert f'X0, X1 = {float(region.x0)}, {float(region.x1)}' in s.code
     if region is not None:
         assert region.describe() in s.code        # the region is written out in words, too
-assert tte.SELECTION_SCRIPT_VERSION == '1.0'
+assert tte.SELECTION_SCRIPT_VERSION == '1.1'
+
+# The script must carry each column's coordinate keywords (TCTYPn, TCRPXn ...) into the file it writes: astropy
+# writes those from attributes of the column, so a rebuilt column loses them unless they are passed on. (Run just
+# the helper out of a generated script, with a stand-in for astropy's Column that records what it is given.)
+import types
+s = tte.build_selection_script(ds, (10.0, 20.0), Box(400, 600, 400, 600), 'image', Corrections(randcorr=False, geocorr=False))
+start, stop = s.code.index('STRUCTURE_KEYWORD ='), s.code.index('def in_file_order')
+made = []
+fits_stub = types.SimpleNamespace(Column=lambda **kw: made.append(kw) or kw)
+namespace = {'np': np, 're': __import__('re'), 'fits': fits_stub}
+exec(s.code[start:stop], namespace)
+column = types.SimpleNamespace(unit='pixel', coord_type='RA---TAN', coord_unit='deg', coord_ref_point=512.5,
+                               coord_ref_value=150.25, coord_inc=-1e-6, time_ref_pos=None)
+hdu = types.SimpleNamespace(columns={'AXIS1': column}, data={'AXIS1': np.arange(3, dtype=np.int16)})
+namespace['stored_column'](hdu, 'AXIS1')
+assert made[0]['coord_ref_point'] == 512.5 and made[0]['coord_type'] == 'RA---TAN' and made[0]['coord_inc'] == -1e-6, made
+assert made[0]['format'] == 'I' and made[0]['unit'] == 'pixel'
 print('selection script ok')

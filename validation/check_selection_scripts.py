@@ -32,6 +32,7 @@ import argparse
 import csv
 import itertools
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -210,6 +211,22 @@ def same(a, b):
     return a.shape == b.shape and bool(np.array_equal(a, b))
 
 
+# Keywords that describe the table's layout, which the script rebuilds: column definitions (TTYPEn, TFORMn, TSCALn ...)
+# and the sizes. (The column coordinate keywords TCTYPn, TCRPXn ... are NOT in this list: they must survive.)
+STRUCTURE_KEYWORD = re.compile(r'T(TYPE|FORM|UNIT|NULL|SCAL|ZERO|DISP|BCOL|DIM)\d+|XTENSION|BITPIX|NAXIS\d*|PCOUNT|GCOUNT'
+                               r'|TFIELDS|THEAP')
+
+
+def same_value(a, b):
+    """Header values compared as written (floats to 12 digits, since astropy re-formats them)."""
+    if isinstance(a, float) or isinstance(b, float):
+        try:
+            return bool(np.isclose(float(a), float(b), rtol=1e-12, atol=0.0))
+        except (TypeError, ValueError):
+            return False
+    return a == b
+
+
 def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
     """Problems found in the script's output file (an empty list means it is right)."""
     frame, shape, selection, (rand, geo, edge) = case
@@ -262,10 +279,20 @@ def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
         for ok, text in checks:
             if not ok:
                 problems.append('header: ' + text)
-        # the original header keywords survive (the scaled TIME column's own are rewritten, so skip those)
-        for key in ('EXPTIME', 'TCRPX2', 'TC2_2'):
-            if key in old[1].header and new[1].header.get(key) != old[1].header[key]:
-                problems.append(f'header keyword {key} changed')
+        # every other keyword of the event table survives with the same value; only the table's own structure
+        # (column definitions, which astropy writes afresh, and the sizes) may differ
+        lost, changed = [], []
+        for key in dict.fromkeys(old[1].header):
+            if STRUCTURE_KEYWORD.fullmatch(key) or key in ('COMMENT', 'HISTORY', ''):
+                continue
+            if key not in new[1].header:
+                lost.append(key)
+            elif not same_value(new[1].header[key], old[1].header[key]):
+                changed.append(key)
+        if lost:
+            problems.append(f'header keywords lost: {", ".join(lost)}')
+        if changed:
+            problems.append(f'header keywords changed: {", ".join(changed)}')
     return problems
 
 

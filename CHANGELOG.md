@@ -13,7 +13,18 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
-## [1.0.1] - Unreleased
+## [1.1.0] - Unreleased
+
+**Selection scripts (`SELECTION_SCRIPT_VERSION` 1.1) write a different file: no computed number changes.**
+
+* The event table's per-column coordinate keywords (`TCTYPn`, `TCUNIn`, `TCRPXn`, `TCRVLn`, `TCDLTn`, `TRPOSn`: the
+  sky coordinates of the AXIS1 / AXIS2 columns) were dropped from the `_tagsel.fits` file that a script writes, because
+  astropy writes them from attributes of the column and the script rebuilt the columns without them. They are now
+  kept. Flags, columns and values are unchanged; files written by a 1.0 script lack these keywords.
+* `validation/check_selection_scripts.py` now compares every keyword of the event table, not three, so a keyword lost
+  in this way cannot pass unnoticed. (The weekly check found this.)
+
+## [1.0.1] - 2026-10-29
 
 Packaging and documentation only; **no computed number changes** (`SELECTION_SCRIPT_VERSION` stays 1.0).
 

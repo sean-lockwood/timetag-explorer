@@ -27,7 +27,7 @@ RANDOM_SEED = 0          # fixed, so repeated renders of one dataset agree
 # files they produce, and the number is written into both (docstring, SCRIPT_VERSION, the SELVER header
 # keyword, HISTORY), so raise it whenever build_selection_script changes what the script computes or
 # writes (not for wording changes in the dialog).
-SELECTION_SCRIPT_VERSION = '1.0'   # the first released version (earlier development versions are not kept)
+SELECTION_SCRIPT_VERSION = '1.1'   # 1.1: the event table's per-column coordinate keywords (TCRPXn ...) are kept
 DEFAULT_TOOL_URL = 'https://explorer.planetarylightshow.com'   # TAG_EXPLORER_URL, when set, takes its place
 MAX_CACHED_FRAMES = 2    # per dataset; each cached frame costs 4 bytes per event
 EVENT_CHUNK = 1 << 20    # events handled at a time, so temporary arrays stay small whatever the file size
