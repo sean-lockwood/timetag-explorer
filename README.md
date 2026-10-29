@@ -1,5 +1,9 @@
 # timetag-explorer
 
+[![Tests](https://github.com/sean-lockwood/timetag-explorer/actions/workflows/ci.yml/badge.svg)](https://github.com/sean-lockwood/timetag-explorer/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/timetag-explorer)](https://pypi.org/project/timetag-explorer/)
+[![Documentation](https://app.readthedocs.org/projects/timetag-explorer/badge/?version=latest)](https://timetag-explorer.readthedocs.io)
+
 The science code behind [TIME-TAG Explorer](https://explorer.planetarylightshow.com), a web app for exploring
 HST/STIS FUV TIME-TAG observations (aurorae on Jupiter and Saturn, and other targets that move or vary).
 
@@ -9,7 +13,7 @@ scripts". The web server around it (sign-in, pages, plots and mouse selection) i
 this package knows nothing about it. Everything the app computes about the data comes from here, so this is the part
 that scientific review should look at.
 
-> **Status: first release, not yet validated.** [VALIDATION.md](VALIDATION.md) lists each step with its reference and
+> **Status: first release, not yet validated.** [VALIDATION.md](https://github.com/sean-lockwood/timetag-explorer/blob/main/VALIDATION.md) lists each step with its reference and
 > its review status. The geometric distortion correction is **disabled** in this release: `gdcorr.py` holds
 > placeholder (zero) coefficients until values from a public reference file replace them.
 
@@ -18,10 +22,11 @@ that scientific review should look at.
 Python 3.11 or newer.
 
 ```
-pip install git+https://github.com/sean-lockwood/timetag-explorer.git@v1.0.0
+pip install timetag-explorer
 ```
 
-or, to work on the code, clone the repository and `pip install -e .` in it.
+To work on the code, clone the repository and `pip install -e .` in it. Documentation:
+<https://timetag-explorer.readthedocs.io>.
 
 ## A first look
 
@@ -72,19 +77,19 @@ python validation/check_selection_scripts.py OFAP44G5Q    # slow: runs generated
 ```
 
 The first set runs on every pull request. The second runs every week on GitHub Actions. See
-[VALIDATION.md](VALIDATION.md) for what each step is checked against.
+[VALIDATION.md](https://github.com/sean-lockwood/timetag-explorer/blob/main/VALIDATION.md) for what each step is checked against.
 
 ## Contributing
 
-Questions and concerns about the science are welcome as [issues](../../issues); proposed changes as pull requests.
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) first. Requests for access to the web app go to the address on the
+Questions and concerns about the science are welcome as [issues](https://github.com/sean-lockwood/timetag-explorer/issues); proposed changes as pull requests.
+Please read [CONTRIBUTING.md](https://github.com/sean-lockwood/timetag-explorer/blob/main/CONTRIBUTING.md) first. Requests for access to the web app go to the address on the
 [app's front page](https://explorer.planetarylightshow.com/about), not here.
 
 ## Citing
 
-Use the "Cite this repository" button on GitHub, or [CITATION.cff](CITATION.cff). A DOI will be added once the first
+Use the "Cite this repository" button on GitHub, or [CITATION.cff](https://github.com/sean-lockwood/timetag-explorer/blob/main/CITATION.cff). A DOI will be added once the first
 release is archived.
 
 ## License
 
-BSD 3-Clause. See [LICENSE](LICENSE).
+BSD 3-Clause. See [LICENSE](https://github.com/sean-lockwood/timetag-explorer/blob/main/LICENSE).

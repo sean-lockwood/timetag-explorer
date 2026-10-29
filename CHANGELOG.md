@@ -13,7 +13,15 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
-## [1.0.0] - Unreleased
+## [1.0.1] - Unreleased
+
+Packaging and documentation only; **no computed number changes** (`SELECTION_SCRIPT_VERSION` stays 1.0).
+
+* First release on PyPI (`pip install timetag-explorer`), published from GitHub Actions.
+* Sphinx documentation on Read the Docs: <https://timetag-explorer.readthedocs.io>.
+* Project links, classifiers and absolute README links, so the PyPI page works; repository URL in `CITATION.cff`.
+
+## [1.0.0] - 2026-10-28
 
 First public release: the science code that the TIME-TAG Explorer web app uses, split out of the app.
 

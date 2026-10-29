@@ -6,9 +6,10 @@ authors:
   - family-names: Lockwood
     given-names: Sean
     orcid: "https://orcid.org/0000-0002-0743-2645"
-version: 1.0.0
+version: 1.0.1
 license: BSD-3-Clause
 url: "https://explorer.planetarylightshow.com"
+repository-code: "https://github.com/sean-lockwood/timetag-explorer"
 abstract: >-
   The calculations behind TIME-TAG Explorer, a web app for exploring HST/STIS FUV TIME-TAG observations:
   processing steps, reference frames, planet maps and selection scripts.

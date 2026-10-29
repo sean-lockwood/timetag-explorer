@@ -8,3 +8,4 @@ dist/
 *.fits
 horizons/
 selection_test/
+docs/_build/

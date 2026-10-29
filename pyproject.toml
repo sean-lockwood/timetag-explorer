@@ -13,8 +13,15 @@ license-files = ["LICENSE"]
 authors = [{ name = "Sean Lockwood" }]
 keywords = ["astronomy", "HST", "STIS", "TIME-TAG", "FUV", "aurora"]
 classifiers = [
-    "Programming Language :: Python :: 3",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
 dependencies = [
@@ -24,10 +31,13 @@ dependencies = [
     "astroquery>=0.4.10",   # JPL Horizons, for the planet frames and maps
 ]
 
+[project.optional-dependencies]
+docs = ["sphinx>=7.2", "sphinx-rtd-theme>=2.0"]
+
 [project.urls]
 Homepage = "https://explorer.planetarylightshow.com"
-Documentation = "https://explorer.planetarylightshow.com/docs"
-Repository = "https://github.com/sean-lockwood/timetag-explorer.git"
+Documentation = "https://timetag-explorer.readthedocs.io"
+Source = "https://github.com/sean-lockwood/timetag-explorer"
 Issues = "https://github.com/sean-lockwood/timetag-explorer/issues"
 Changelog = "https://github.com/sean-lockwood/timetag-explorer/blob/main/CHANGELOG.md"
 
