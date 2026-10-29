@@ -85,6 +85,16 @@ Questions and concerns about the science are welcome as [issues](https://github.
 Please read [CONTRIBUTING.md](https://github.com/sean-lockwood/timetag-explorer/blob/main/CONTRIBUTING.md) first. Requests for access to the web app go to the address on the
 [app's front page](https://explorer.planetarylightshow.com/about), not here.
 
+## AI disclosure
+
+TIME-TAG Explorer, including this science code, was built with AI assistance: the code was written with Claude,
+Anthropic's AI model (mainly Claude Sonnet 5.5), under human direction. It was developed iteratively, deployed
+continuously, and checked against expected results at each step. Snippets of previously validated algorithms served as
+references for the scientific steps, such as the corrections and reference frame transformations. Features still under
+review, including the planet maps, planet registration, and script generation, are marked *experimental*. Script
+generation has not yet been tested by the author. Please check any result you plan to publish against your own
+analysis. Report problems as [issues](https://github.com/sean-lockwood/timetag-explorer/issues).
+
 ## Citing
 
 Use the "Cite this repository" button on GitHub, or [CITATION.cff](https://github.com/sean-lockwood/timetag-explorer/blob/main/CITATION.cff). A DOI will be added once the first
