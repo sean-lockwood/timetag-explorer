@@ -12,7 +12,7 @@ import numpy as np
 from astropy.io import fits
 
 from . import config
-from .constants import (EDGE_TRIM_PIXELS, EVENT_CHUNK, FLAT_SHAPE, FLAT_URL, MAX_CACHED_FRAMES, SPATIAL_BIN,
+from .constants import (EDGE_TRIM, EVENT_CHUNK, FLAT_SHAPE, FLAT_URL, MAX_CACHED_FRAMES, SPATIAL_BIN,
                         TIME_CORR_MIN_FRACTION, TIME_COL, X_COL, Y_COL, TimeSel, _chunks)
 from .frames import (DEFAULT_CORRECTIONS, Corrections, FrameInfo, clamp_binsize, frame_label, is_map, is_planet,
                      load_frame_info)
@@ -159,16 +159,18 @@ class TagDataset:
     def valid_events(self, corr: Corrections) -> np.ndarray | None:
         """Boolean per-event mask of the events kept, or None to keep all.
 
-        With the exposure-time correction on, events within EDGE_TRIM_PIXELS of a
-        detector edge (vignetted, so not a perfect rectangle) are discarded. This
+        With the exposure-time correction on, events within EDGE_TRIM (a distance for each edge)
+        of a detector edge (vignetted, so not a perfect rectangle) are discarded. This
         uses the recorded pixel, i.e. the detector position, whatever the frame.
         """
-        if not corr.timecorr or EDGE_TRIM_PIXELS <= 0:
+        if not corr.timecorr or not any(EDGE_TRIM):
             return None
         with self._lock:
             if self._valid is None:
-                lo, hi = EDGE_TRIM_PIXELS + 1, 2048 - EDGE_TRIM_PIXELS  # AXIS values are 1-indexed
-                valid = (self.x >= lo) & (self.x <= hi) & (self.y >= lo) & (self.y <= hi)
+                left, right, bottom, top = EDGE_TRIM
+                # AXIS values are 1-indexed
+                valid = ((self.x >= left + 1) & (self.x <= 2048 - right)
+                         & (self.y >= bottom + 1) & (self.y <= 2048 - top))
                 valid.flags.writeable = False
                 self._valid = valid
             return self._valid

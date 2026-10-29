@@ -13,6 +13,23 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
+## [1.2.0] - Unreleased
+
+**Results change: the detector-edge trim is no longer the same on all four sides** (`SELECTION_SCRIPT_VERSION` 1.2).
+
+* The border discarded with the exposure-time correction was 30 hi-res pixels on every side. It is now, in hi-res pixels
+  (two per low-res pixel): **left 30, right 6, bottom 28, top 6** (15, 3, 14 and 3 low-res pixels), as the image frame
+  shows the detector (left and right are AXIS1, bottom and top AXIS2). The values come from exposure ODDS22A8Q, which
+  fills the field of view with external light; they are `EDGE_TRIM` in `constants.py` and may change again if vignetting
+  is still visible.
+* Events within the extra 24 pixels on the right and on the top and the extra 2 on the bottom (compared with 30 on
+  every side) are now kept, and the exposure map counts those pixels as on the detector, so image and light-curve
+  numbers change near those edges. The left edge and the middle of the detector are unchanged.
+* Selection scripts: `EDGE_OK` follows the new trim (constants `EDGE_X_LOW`, `EDGE_X_HIGH`, `EDGE_Y_LOW`,
+  `EDGE_Y_HIGH`), and the header keyword `SELEDGE` is replaced by `SELEDGEL`, `SELEDGER`, `SELEDGEB`, `SELEDGET`.
+* `constants.EDGE_TRIM_PIXELS` and `DETECTOR_LIMITS` are replaced by `EDGE_TRIM` (a named tuple) and
+  `DETECTOR_LIMITS_X` / `DETECTOR_LIMITS_Y`.
+
 ## [1.1.0] - 2026-10-29
 
 **Selection scripts (`SELECTION_SCRIPT_VERSION` 1.1) write a different file: no computed number changes.**

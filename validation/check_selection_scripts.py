@@ -183,7 +183,7 @@ def reference_flags(te, ds, order, case, time_sel, region):
         flags['SEL_TIME'] = to_file_order(m, order)
     if region is not None and frame in PIXEL_FRAMES:
         flags['SEL_REGION'] = to_file_order(ds.region_mask(region, frame, corr), order)
-    if edge and te.EDGE_TRIM_PIXELS > 0:
+    if edge and any(te.EDGE_TRIM):
         ok = ds.valid_events(corr)
         flags['EDGE_OK'] = to_file_order(np.ones(len(ds.time), bool) if ok is None else ok, order)
     return flags
@@ -272,6 +272,9 @@ def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
                   (host in str(header.get('SELURL', '')), f'SELURL {header.get("SELURL")!r}'),
                   (host in history, 'tool URL missing from HISTORY'),
                   ('v' + te.SELECTION_SCRIPT_VERSION in history, 'script version missing from HISTORY')]
+        if edge:
+            checks += [(header.get(key) == pixels, f'{key} {header.get(key)!r}, expected {pixels}')
+                       for key, pixels in zip(('SELEDGEL', 'SELEDGER', 'SELEDGEB', 'SELEDGET'), te.EDGE_TRIM)]
         if region is not None and frame in PIXEL_FRAMES:
             checks += [(header.get('SELFRAME') == frame, f'SELFRAME {header.get("SELFRAME")!r}'),
                        (header.get('SELRAND') == rand, f'SELRAND {header.get("SELRAND")!r}'),
@@ -349,7 +352,7 @@ def main(argv=None):
         Box=tte.Box, Circle=tte.Circle, Polygon=tte.Polygon, Corrections=tte.Corrections, FrameInfo=tte.FrameInfo,
         TagDataset=tte.TagDataset, build_selection_script=tte.build_selection_script,
         SELECTION_SCRIPT_VERSION=tte.SELECTION_SCRIPT_VERSION, TIME_DECIMALS=constants.TIME_DECIMALS,
-        EDGE_TRIM_PIXELS=constants.EDGE_TRIM_PIXELS, tool_url=tte.selection_script.tool_url,
+        EDGE_TRIM=constants.EDGE_TRIM, tool_url=tte.selection_script.tool_url,
         _is_sorted=tte_dataset._is_sorted, _load_dataset_uncached=tte_dataset._load_dataset_uncached)
 
     if args.tag_file:

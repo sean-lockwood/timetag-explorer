@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from . import config, gdcorr
-from .constants import (DEFAULT_TOOL_URL, EDGE_TRIM_PIXELS, EVENT_CHUNK, RANDOM_SEED, SELECTION_SCRIPT_VERSION,
+from .constants import (DEFAULT_TOOL_URL, EDGE_TRIM, EVENT_CHUNK, RANDOM_SEED, SELECTION_SCRIPT_VERSION,
                         SPATIAL_BIN, TIME_DECIMALS, TimeSel)
 from .dataset import TagDataset
 from .frames import ARCSEC_PER_LOWRES_PIXEL, DETECTOR_CENTRE, Corrections, frame_label, is_map
@@ -22,6 +22,7 @@ from .regions import Box, Circle, Polygon, Region
 # --------------------------------------------------------------------------
 
 PIXEL_FRAMES = ('image', 'rest', 'rest_north')  # frames that need nothing beyond numbers from the header
+EDGE_TRIM_TEXT = f'left {EDGE_TRIM.left}, right {EDGE_TRIM.right}, bottom {EDGE_TRIM.bottom}, top {EDGE_TRIM.top}'
 
 
 @dataclass(frozen=True)
@@ -101,7 +102,7 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
     geo = bool(corr.geocorr) and placeable
     jitter = bool(corr.randcorr) and placeable
     rest = placeable and frame != 'image'
-    edge = bool(corr.timecorr) and EDGE_TRIM_PIXELS > 0
+    edge = bool(corr.timecorr) and any(EDGE_TRIM)
     grid = ds.grid(frame, corr) if region is not None else None
     url = tool_url()
     version = SELECTION_SCRIPT_VERSION
@@ -128,7 +129,7 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
     if rest:
         ran.append('target rest-frame shift' + (' and north-up rotation' if frame == 'rest_north' else ''))
     if edge:
-        ran.append(f'detector edge trim ({EDGE_TRIM_PIXELS} pixels)')
+        ran.append(f'detector edge trim ({EDGE_TRIM_TEXT} pixels)')
 
     notes, warnings = [], []
     notes.append(f'Run it in an empty folder: it downloads `{root}_tag.fits` from MAST if the file is not there '
@@ -317,8 +318,10 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
         add('')
         add('')
         add('# ---- detector edge -----------------------------------------------------------------')
-        add(f'# With its exposure-time correction on, the Explorer drops events within {EDGE_TRIM_PIXELS} pixels of an edge.')
-        add(f'EDGE_LOW, EDGE_HIGH = {EDGE_TRIM_PIXELS + 1}, {2048 - EDGE_TRIM_PIXELS}   # AXIS values to keep')
+        add('# With its exposure-time correction on, the Explorer drops events near the detector edges, as far from')
+        add(f'# each edge as: {EDGE_TRIM_TEXT} pixels (the image frame\'s left and right are AXIS1, bottom and top AXIS2).')
+        add(f'EDGE_X_LOW, EDGE_X_HIGH = {EDGE_TRIM.left + 1}, {2048 - EDGE_TRIM.right}   # AXIS1 values to keep')
+        add(f'EDGE_Y_LOW, EDGE_Y_HIGH = {EDGE_TRIM.bottom + 1}, {2048 - EDGE_TRIM.top}   # AXIS2 values to keep')
 
     # ---- what goes into the headers ------------------------------------------------------------
     history = []
@@ -329,7 +332,7 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
         history.append(f'SEL_REGION: True for events inside this region of the {label}: {region.describe()}')
         history.append('Region, unrounded: ' + _region_exact(region))
     if edge:
-        history.append(f'EDGE_OK: True for events more than {EDGE_TRIM_PIXELS} pixels from a detector edge')
+        history.append(f'EDGE_OK: True for events outside the detector edge trim ({EDGE_TRIM_TEXT} pixels)')
     history.append('Corrections run: ' + ('; '.join(ran) if ran else 'none'))
     history.append('Not applied: flat-field weights, exposure-time map')
     history.append('Existing columns keep their values; scaled ones (TIME) are stored as plain floating point')
@@ -428,7 +431,7 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
         add('    # With your own coordinates u, v in that frame:  flags[\'SEL_REGION\'] = in_region(u, v)')
     if edge:
         add("    flags['EDGE_OK'] = in_file_order(")
-        add('        (x >= EDGE_LOW) & (x <= EDGE_HIGH) & (y >= EDGE_LOW) & (y <= EDGE_HIGH), order)')
+        add('        (x >= EDGE_X_LOW) & (x <= EDGE_X_HIGH) & (y >= EDGE_Y_LOW) & (y <= EDGE_Y_HIGH), order)')
     add('')
     add("    print(f'{len(time):,} events in {TAG_FILE}')")
     for name in flags:
@@ -456,7 +459,9 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
         add(f"    header['SELRAND'] = ({jitter!r}, 'random sub-pixel offset used for SEL_REGION')")
         add(f"    header['SELGEO'] = ({geo!r}, 'geometric distortion used for SEL_REGION')")
     if edge:
-        add(f"    header['SELEDGE'] = ({EDGE_TRIM_PIXELS}, '[pix] EDGE_OK detector edge trim')")
+        for key, side, pixels in (('SELEDGEL', 'left', EDGE_TRIM.left), ('SELEDGER', 'right', EDGE_TRIM.right),
+                                  ('SELEDGEB', 'bottom', EDGE_TRIM.bottom), ('SELEDGET', 'top', EDGE_TRIM.top)):
+            add(f"    header['{key}'] = ({pixels}, '[pix] EDGE_OK trim of the {side} edge')")
     add('    for text in HISTORY:')
     add('        for line in textwrap.wrap(text, 68):')
     add('            header.add_history(line)')

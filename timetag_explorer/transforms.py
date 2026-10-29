@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from . import gdcorr
-from .constants import (DETECTOR_LIMITS, EXPOSURE_SUBSAMPLE, MAP_BIN_DEGREES, MAP_SEGMENTS, MAP_SLICE_SECONDS,
+from .constants import (DETECTOR_LIMITS_X, DETECTOR_LIMITS_Y, EXPOSURE_SUBSAMPLE, MAP_BIN_DEGREES, MAP_SEGMENTS, MAP_SLICE_SECONDS,
                         PLANET_SEGMENTS, RANDOM_SEED, SPATIAL_BIN, _chunks)
 from .frames import (ARCSEC_PER_LOWRES_PIXEL, DETECTOR_CENTRE, FRAMES, Corrections, FrameInfo, frame_label, is_map,
                      is_north, is_planet)
@@ -336,7 +336,7 @@ def compute_exposure_map(ds: TagDataset, grid: FrameGrid, frame: str, window,
     if hi <= lo:
         return np.zeros((grid.ny, grid.nx))
 
-    d0, d1 = DETECTOR_LIMITS
+    (dx0, dx1), (dy0, dy1) = DETECTOR_LIMITS_X, DETECTOR_LIMITS_Y
     nseg = PLANET_SEGMENTS if is_planet(frame) else 1
     tk = np.linspace(lo, hi, nseg + 1)
     sx, sy = frame_shift(info, frame, tk, track)
@@ -372,8 +372,8 @@ def compute_exposure_map(ds: TagDataset, grid: FrameGrid, frame: str, window,
                 iy = np.clip(np.rint(p0y - smy).astype(np.intp), 0, 2047)
                 start_x = start_x - geo_lut[0][iy, ix]  # raw position = corrected - distortion
                 start_y = start_y - geo_lut[1][iy, ix]
-            lo_x, hi_x = _axis_interval(start_x, wx, d0, d1)
-            lo_y, hi_y = _axis_interval(start_y, wy, d0, d1)
+            lo_x, hi_x = _axis_interval(start_x, wx, dx0, dx1)
+            lo_y, hi_y = _axis_interval(start_y, wy, dy0, dy1)
             t_lo = np.maximum(np.maximum(lo_x, lo_y), 0.0)
             t_hi = np.minimum(np.minimum(hi_x, hi_y), dt)
             acc += np.where(t_hi > t_lo, cum(tk[j] + t_hi) - cum(tk[j] + t_lo), 0.0)
@@ -454,7 +454,7 @@ def map_exposure_from_knots(knots: dict, gti: np.ndarray, window):
     tk, px, py, mu = knots['tk'], knots['px'], knots['py'], knots['mu']
     nb = px.shape[1]
     cum = cumulative_exposure(gti)
-    d0, d1 = DETECTOR_LIMITS
+    (dx0, dx1), (dy0, dy1) = DETECTOR_LIMITS_X, DETECTOR_LIMITS_Y
     pixel_seconds = np.zeros(nb)
     full = np.zeros(nb)
     for j in range(len(tk) - 1):
@@ -472,8 +472,8 @@ def map_exposure_from_knots(knots: dict, gti: np.ndarray, window):
                          * (mu_a + (mu_b - mu_a) * mid / dt) * pixels_face_on, 0.0)
         xa, xb = px[j].astype(np.float64), px[j + 1].astype(np.float64)
         ya, yb = py[j].astype(np.float64), py[j + 1].astype(np.float64)
-        x_lo, x_hi = _interval_vec(xa, -(xb - xa) / dt, d0, d1)
-        y_lo, y_hi = _interval_vec(ya, -(yb - ya) / dt, d0, d1)
+        x_lo, x_hi = _interval_vec(xa, -(xb - xa) / dt, dx0, dx1)
+        y_lo, y_hi = _interval_vec(ya, -(yb - ya) / dt, dy0, dy1)
         t_lo = np.maximum(np.maximum(f_lo, x_lo), y_lo)
         t_hi = np.minimum(np.minimum(f_hi, x_hi), y_hi)
         mid = 0.5 * (t_lo + t_hi)

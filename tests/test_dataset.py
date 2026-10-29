@@ -3,7 +3,7 @@ import support  # noqa: F401
 import numpy as np
 from support import OFF, dataset
 
-from timetag_explorer.constants import EDGE_TRIM_PIXELS, SPATIAL_BIN
+from timetag_explorer.constants import EDGE_TRIM, SPATIAL_BIN
 from timetag_explorer.frames import Corrections
 from timetag_explorer.regions import Box
 
@@ -40,7 +40,7 @@ assert abs(weighted.image(None, 'image', Corrections(randcorr=False, geocorr=Fal
 assert abs(weighted.image(None, 'image', OFF).sum() - 10.0) < 1e-9     # switched off: unweighted
 
 # the vignetted border is discarded only with the exposure-time correction
-edge = dataset(t, np.full(n, EDGE_TRIM_PIXELS - 20), np.full(n, 100))
+edge = dataset(t, np.full(n, EDGE_TRIM.left - 20), np.full(n, 100))
 assert abs(edge.image(None, 'image', OFF).sum() - 10.0) < 1e-9
 assert edge.image(None, 'image', Corrections(randcorr=False, geocorr=False, flatcorr=False, timecorr=True)).sum() == 0.0
 
@@ -52,4 +52,27 @@ assert np.array_equal(a, b) and abs(a.sum() - 10.0) < 1e-9 and a.shape[0] * SPAT
 
 # a window outside the data
 assert ds.image((200.0, 300.0), 'image', OFF).sum() == 0.0
+# The trim differs by side: 15, 3, 14 and 3 low-res pixels (left, right, bottom, top) = 30, 6, 28, 6 hi-res pixels.
+# AXIS values are 1-indexed, so the first kept column is 31 on the left and the last kept one is 2042 on the right.
+assert tuple(EDGE_TRIM) == (30, 6, 28, 6), EDGE_TRIM
+ON = Corrections(randcorr=False, geocorr=False, flatcorr=False, timecorr=True)
+xs = np.array([30, 31, 2042, 2043, 1000, 1000, 1000, 1000, 1000, 1000], dtype=np.int16)    # x, then y, of ten events
+ys = np.array([1000, 1000, 1000, 1000, 28, 29, 2042, 2043, 1000, 1000], dtype=np.int16)
+sides = dataset(np.linspace(0, 99, 10), xs, ys)
+kept = sides.valid_events(ON)
+assert kept.tolist() == [False, True, True, False, False, True, True, False, True, True], kept.tolist()   # (the last two: middle)
+assert sides.valid_events(OFF) is None                          # the trim belongs to the exposure-time correction
+
+# The exposure map treats the detector as the rectangle that is kept: a bin is dark outside it, partly lit where
+# the edge cuts it (bins are four hi-res pixels wide, edges at 4k - 0.5), full inside. Image frame, nothing moving.
+corners = dataset(np.linspace(0, 99, 4), [1, 2048, 1, 2048], [1, 1, 2048, 2048])    # puts the grid over the whole detector
+expo = corners.exposure_map(None, 'image', ON)
+assert expo.shape == (512, 512) and abs(expo.max() - 100.0) < 1e-6
+column = expo[256]            # a row in the middle: x bins (0-indexed pixels 4i .. 4i+3)
+assert column[6] == 0.0 and abs(column[7] - 50.0) < 1e-6 and abs(column[8] - 100.0) < 1e-6     # left: pixels 0-29 off, 30 on
+assert abs(column[509] - 100.0) < 1e-6 and abs(column[510] - 50.0) < 1e-6 and column[511] == 0.0   # right: 2042-2047 off
+row = expo[:, 256]            # a column in the middle: y bins
+assert row[6] == 0.0 and abs(row[7] - 100.0) < 1e-6          # bottom: pixels 0-27 off, 28 on: bin 7 (28-31) is whole
+assert abs(row[509] - 100.0) < 1e-6 and abs(row[510] - 50.0) < 1e-6 and row[511] == 0.0              # top: 2042-2047 off
+assert abs(expo[7, 7] - 50.0) < 1e-6                         # the corner bin, half in x and whole in y
 print('dataset ok')
