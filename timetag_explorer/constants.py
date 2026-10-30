@@ -65,6 +65,9 @@ class EdgeTrim(NamedTuple):
 # with that border removed. Set a side to 0 to keep it, all four to 0 to keep the whole detector.
 # (From exposure ODDS22A8Q, which fills the field of view with external light: 15, 3, 14 and 3 low-res pixels.)
 EDGE_TRIM = EdgeTrim(left=30, right=6, bottom=28, top=6)
+
+# The vignetting model (vignette.py) was measured through this aperture only, so it is applied to no other.
+VIGNETTE_APERTURE = 'F25SRF2'
 # The rectangle that is kept, in 0-indexed hi-res pixel coordinates (a pixel p covers [p - 0.5, p + 0.5]).
 DETECTOR_LIMITS_X = (EDGE_TRIM.left - 0.5, 2047.5 - EDGE_TRIM.right)
 DETECTOR_LIMITS_Y = (EDGE_TRIM.bottom - 0.5, 2047.5 - EDGE_TRIM.top)

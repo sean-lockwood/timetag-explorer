@@ -13,6 +13,23 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
+## [1.3.0] - Unreleased
+
+**New, experimental, off by default: a vignetting model for the F25SRF2 aperture.** No result changes unless it is switched on
+(`SELECTION_SCRIPT_VERSION` is unchanged: selection scripts select events and apply no weights).
+
+* New `vignette` module and switch `Corrections.vigcorr` (default `False`). With it on, each event is weighted by
+  1 / (bottom sensitivity x top sensitivity) at its row, where each sensitivity is a linear ramp: 1 from the inside up
+  to the ramp's start row, falling to 1 - loss at its end row, and on at the same slope beyond it (never below 0.2).
+  The numbers are `Corrections.vigbot_start / _end / _loss` (default 430, 0, 0.25) and `vigtop_start / _end / _loss`
+  (default 1550, 2047, 0.23), rows being 0-indexed hi-res detector pixels as the image frame shows them. The defaults
+  are empirical (exposure ODDS22A8Q) and their meaning, instrument vignetting or limb darkening, is not settled.
+* The model is applied only to exposures through **F25SRF2** (the primary-header `APERTURE`, new attribute
+  `TagDataset.aperture`; `TagDataset.vignette_applies()`). For any other aperture the switch does nothing.
+* It is applied **after the geometric distortion step**: with `geocorr` on, the row is the recorded row plus the
+  distortion table's row offset at the recorded pixel (the same lookup the frame coordinates use). The weights multiply
+  the flat-field weights and apply to images and to light curves; the exposure-time (edge) trim is unchanged.
+
 ## [1.2.0] - Unreleased
 
 **Results change: the detector-edge trim is no longer the same on all four sides** (`SELECTION_SCRIPT_VERSION` 1.2).

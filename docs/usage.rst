@@ -40,5 +40,6 @@ Module                     Contents
 ``analysis``               areas, mean brightness and the exposure for a selection
 ``selection_script``       the generator of selection scripts (and its version, ``SELVER``)
 ``gdcorr``                 the geometric distortion polynomial (placeholder coefficients for now)
+``vignette``               the experimental vignetting model (F25SRF2 only; off by default)
 ``constants``, ``config``  shared numbers; file locations; logging
 =========================  ==================================================================================

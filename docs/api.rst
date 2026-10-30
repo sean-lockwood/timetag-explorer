@@ -27,6 +27,11 @@ Geometric distortion
 
 .. automodule:: timetag_explorer.gdcorr
 
+Vignetting model (experimental)
+-------------------------------
+
+.. automodule:: timetag_explorer.vignette
+
 Planets
 -------
 
