@@ -23,7 +23,7 @@ to the version that made it.
   to the ramp's start row, falling to 1 - loss at its end row, and on at the same slope beyond it (never below 0.2).
   The numbers are `Corrections.vigbot_start / _end / _loss` (default 430, 0, 0.25) and `vigtop_start / _end / _loss`
   (default 1550, 2047, 0.23), rows being 0-indexed hi-res detector pixels as the image frame shows them. The defaults
-  are empirical (exposure ODDS22A8Q) and their meaning, instrument vignetting or limb darkening, is not settled.
+  are empirical (exposure ODDS22A8Q) and they are still under study.
 * The model is applied only to exposures through **F25SRF2** (the primary-header `APERTURE`, new attribute
   `TagDataset.aperture`; `TagDataset.vignette_applies()`). For any other aperture the switch does nothing.
 * It is applied **after the geometric distortion step**: with `geocorr` on, the row is the recorded row plus the
