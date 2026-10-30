@@ -13,7 +13,7 @@ from astropy.io import fits
 
 from . import config
 from .constants import (EDGE_TRIM, EVENT_CHUNK, FLAT_SHAPE, FLAT_URL, MAX_CACHED_FRAMES, SPATIAL_BIN,
-                        TIME_CORR_MIN_FRACTION, TIME_COL, X_COL, Y_COL, TimeSel, _chunks)
+                        TIME_CORR_MIN_FRACTION, TIME_COL, VIGNETTE_APERTURE, X_COL, Y_COL, TimeSel, _chunks)
 from .frames import (DEFAULT_CORRECTIONS, Corrections, FrameInfo, clamp_binsize, frame_label, is_map, is_planet,
                      load_frame_info)
 from .horizons import (PlanetTrack, load_horizons_positions, planet_track_from_offsets,
@@ -22,6 +22,7 @@ from .log import logger
 from .regions import Region
 from .transforms import (FrameGrid, PlanetGeometry, build_planet_geometry, compute_exposure_map, load_geo_lut,
                          make_frame_grid, map_exposure_from_knots, map_knots)
+from .vignette import event_gain
 
 
 
@@ -57,6 +58,7 @@ class TagDataset:
     ttimeobs: str = ''
     texptime: float | None = None
     propaper: str = ''     # proposed aperture / filter
+    aperture: str = ''     # aperture actually used (APERTURE in the primary header)
     _grids: OrderedDict = field(default_factory=OrderedDict, init=False, repr=False)
     _expo: OrderedDict = field(default_factory=OrderedDict, init=False, repr=False)
     _track: PlanetTrack | None = field(default=None, init=False, repr=False)
@@ -175,18 +177,41 @@ class TagDataset:
                 self._valid = valid
             return self._valid
 
-    def _running_sum(self, weighted: bool, valid: np.ndarray | None) -> np.ndarray:
-        """[0, cumsum] over events of the flat weight (or 1) of the kept events, so any
+    def vignette_applies(self) -> bool:
+        """Whether the vignetting model describes this exposure: it was measured through one aperture only."""
+        return self.aperture.upper() == VIGNETTE_APERTURE
+
+    def _vignette_key(self, corr: Corrections) -> tuple | None:
+        """What the vignetting weights depend on (None when they are not applied): the ramps, and whether the
+        geometric distortion moves the rows they are evaluated at."""
+        ramps = corr.vignette_ramps()
+        return None if ramps is None or not self.vignette_applies() else (ramps, corr.geocorr)
+
+    def _event_weights(self, corr: Corrections, lo: int, hi: int) -> np.ndarray | None:
+        """Weights of events lo:hi: the flat-field weight, times (experimental) the vignetting gain at the event's
+        row once distortion-corrected; None when neither applies."""
+        weights = self.weight[lo:hi] if corr.flatcorr and self.weight is not None else None
+        if self._vignette_key(corr) is not None:
+            bottom, top = corr.vignette_ramps()
+            y_offset = load_geo_lut()[1] if corr.geocorr else None
+            gain = event_gain(self.x[lo:hi], self.y[lo:hi], bottom, top, y_offset)
+            weights = gain if weights is None else weights * gain
+        return weights
+
+    def _running_sum(self, corr: Corrections, valid: np.ndarray | None) -> np.ndarray:
+        """[0, cumsum] over events of their weight (or 1) of the kept events, so any
         time range sums in O(1). One is kept at a time (8 bytes per event); switching
         corrections rebuilds it in tens of milliseconds per million events."""
-        key = (weighted, valid is not None)
+        weighted = self._weighted(corr)
+        key = (weighted, valid is not None, corr.flatcorr, self._vignette_key(corr))
         with self._lock:
             if self._cum is None or self._cum[0] != key:
                 n = len(self.time)
                 running = np.zeros(n + 1)  # float64, filled a chunk at a time
                 for lo, hi in _chunks(n):
                     if weighted:
-                        per_event = self.weight[lo:hi] * valid[lo:hi] if valid is not None else self.weight[lo:hi]
+                        w = self._event_weights(corr, lo, hi)
+                        per_event = w * valid[lo:hi] if valid is not None else w
                     else:
                         per_event = valid[lo:hi]
                     running[lo + 1:hi + 1] = np.cumsum(per_event, dtype=np.float64) + running[lo]
@@ -227,7 +252,7 @@ class TagDataset:
         return slice(int(lo), int(hi))
 
     def _weighted(self, corr: Corrections) -> bool:
-        return corr.flatcorr and self.weight is not None
+        return (corr.flatcorr and self.weight is not None) or self._vignette_key(corr) is not None
 
     def region_grid(self, region: Region, frame: str = 'image',
                     corr: Corrections = DEFAULT_CORRECTIONS) -> np.ndarray:
@@ -275,7 +300,7 @@ class TagDataset:
             # sum (of events, or of weights) at the bin edges.
             idx = np.searchsorted(self.time, edges)
             if weighted or valid is not None:
-                counts = np.diff(self._running_sum(weighted, valid)[idx])
+                counts = np.diff(self._running_sum(corr, valid)[idx])
             else:
                 counts = np.diff(idx)
         else:
@@ -289,7 +314,7 @@ class TagDataset:
                 chosen = mask[lo:hi]
                 if not chosen.any():
                     continue
-                w = self.weight[lo:hi][chosen].astype(np.float64) if weighted else None
+                w = self._event_weights(corr, lo, hi)[chosen].astype(np.float64) if weighted else None
                 counts += np.histogram(self.time[lo:hi][chosen], bins=edges, weights=w)[0]
         exposure = self.bin_exposure(edges)
         rate = np.divide(counts, exposure, out=np.full(len(counts), np.nan), where=exposure > 1e-9)
@@ -314,7 +339,7 @@ class TagDataset:
         counts = np.zeros(grid.nx * grid.ny)
         for lo in range(start, stop, EVENT_CHUNK):  # a chunk at a time: bincount copies its inputs to int64 / float64
             hi = min(lo + EVENT_CHUNK, stop)
-            w = self.weight[lo:hi] if weighted else None
+            w = self._event_weights(corr, lo, hi) if weighted else None
             if keep is not None:  # a zero weight discards the event
                 w = keep[lo:hi].astype(np.float64) if w is None else w * keep[lo:hi]
             counts += np.bincount(grid.bin_index[lo:hi], weights=w, minlength=grid.nx * grid.ny)
@@ -448,6 +473,7 @@ def _load_dataset_uncached(path: str) -> TagDataset:
         ttimeobs=str(header.get('TTIMEOBS', '')).strip(),
         texptime=_as_float(header.get('TEXPTIME')),
         propaper=str(header.get('PROPAPER', '')).strip(),
+        aperture=str(header.get('APERTURE', '')).strip(),
     )
 
 

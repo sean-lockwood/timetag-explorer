@@ -32,12 +32,29 @@ class Corrections:
     geocorr: bool = True    # geometric distortion correction (gdcorr.py, via a lookup table)
     flatcorr: bool = True   # flat-field weights
     timecorr: bool = True   # divide by the time each frame pixel was actually on the detector
+    # EXPERIMENTAL (vignette.py), off by default, F25SRF2 only: linear sensitivity ramps towards the bottom and the top
+    # of the detector, divided out after the geometric distortion step. Rows are 0-indexed hi-res detector pixels; the
+    # loss is a fraction of the sensitivity, reached at the end row.
+    vigcorr: bool = False
+    vigbot_start: float = 430.0
+    vigbot_end: float = 0.0
+    vigbot_loss: float = 0.25
+    vigtop_start: float = 1550.0
+    vigtop_end: float = 2047.0
+    vigtop_loss: float = 0.23
     # Planet maps and the limb overlay: offset added to the planet centre guessed from the
     # header (hi-res pixels), and the emission altitude of the projection (None = the
     # planet's default). They live here so they are part of every cache key.
     centre_dx: float = 0.0
     centre_dy: float = 0.0
     altitude_km: float | None = None
+
+    def vignette_ramps(self) -> tuple | None:
+        """((start, end, loss) of the bottom ramp, the same for the top), or None when the model is off."""
+        if not self.vigcorr:
+            return None
+        return ((self.vigbot_start, self.vigbot_end, self.vigbot_loss),
+                (self.vigtop_start, self.vigtop_end, self.vigtop_loss))
 
     def map_key(self) -> tuple:
         return (self.centre_dx, self.centre_dy, self.altitude_km)
