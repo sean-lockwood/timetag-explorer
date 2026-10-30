@@ -3,6 +3,8 @@
 Nothing here depends on a web server or on where files are kept (see `config` for that)."""
 from __future__ import annotations
 
+from typing import NamedTuple
+
 # Event-table columns (raw _tag files). For _corrtag files you might use
 # 'XCORR' / 'YCORR' or 'XFULL' / 'YFULL' instead.
 TIME_COL, X_COL, Y_COL = 'TIME', 'AXIS1', 'AXIS2'
@@ -27,7 +29,7 @@ RANDOM_SEED = 0          # fixed, so repeated renders of one dataset agree
 # files they produce, and the number is written into both (docstring, SCRIPT_VERSION, the SELVER header
 # keyword, HISTORY), so raise it whenever build_selection_script changes what the script computes or
 # writes (not for wording changes in the dialog).
-SELECTION_SCRIPT_VERSION = '1.1'   # 1.1: the event table's per-column coordinate keywords (TCRPXn ...) are kept
+SELECTION_SCRIPT_VERSION = '1.2'   # 1.2: EDGE_OK uses a different trim on each side; 1.1: column coordinate keywords kept
 DEFAULT_TOOL_URL = 'https://explorer.planetarylightshow.com'   # TAG_EXPLORER_URL, when set, takes its place
 MAX_CACHED_FRAMES = 2    # per dataset; each cached frame costs 4 bytes per event
 EVENT_CHUNK = 1 << 20    # events handled at a time, so temporary arrays stay small whatever the file size
@@ -47,11 +49,24 @@ MAP_SEGMENTS = 8         # the planet's rotation is treated as this many straigh
 MAP_SLICE_SECONDS = 60.0 # events are deprojected in time slices this long
 EXPOSURE_SUBSAMPLE = 2   # sub-samples per bin and axis for a moving footprint (static ones use twice as many)
 PLANET_SEGMENTS = 8      # the planet's path is treated as this many straight segments
-# The detector's edges are vignetted. With the exposure-time correction on, events
-# within EDGE_TRIM_PIXELS of any edge are discarded, and the exposure map treats the
-# detector as the square with that border removed (0-indexed hi-res pixel coordinates,
-# a pixel p covering [p - 0.5, p + 0.5]). Set it to 0 to keep the whole detector.
-EDGE_TRIM_PIXELS = 30
-DETECTOR_LIMITS = (EDGE_TRIM_PIXELS - 0.5, 2047.5 - EDGE_TRIM_PIXELS)
+
+
+class EdgeTrim(NamedTuple):
+    """Detector border discarded, in hi-res pixels (two per low-res pixel), as the image frame shows the detector:
+    `left` and `right` are the low and high AXIS1 (x) edges, `bottom` and `top` the low and high AXIS2 (y) edges."""
+    left: int
+    right: int
+    bottom: int
+    top: int
+
+
+# The detector's edges are vignetted, by different amounts on each side. With the exposure-time correction on,
+# events within these distances of an edge are discarded, and the exposure map treats the detector as the rectangle
+# with that border removed. Set a side to 0 to keep it, all four to 0 to keep the whole detector.
+# (From exposure ODDS22A8Q, which fills the field of view with external light: 15, 3, 14 and 3 low-res pixels.)
+EDGE_TRIM = EdgeTrim(left=30, right=6, bottom=28, top=6)
+# The rectangle that is kept, in 0-indexed hi-res pixel coordinates (a pixel p covers [p - 0.5, p + 0.5]).
+DETECTOR_LIMITS_X = (EDGE_TRIM.left - 0.5, 2047.5 - EDGE_TRIM.right)
+DETECTOR_LIMITS_Y = (EDGE_TRIM.bottom - 0.5, 2047.5 - EDGE_TRIM.top)
 
 TimeSel = tuple[float, float]

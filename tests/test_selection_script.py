@@ -32,7 +32,7 @@ for time_sel, region, frame, corr in cases:
         assert f'X0, X1 = {float(region.x0)}, {float(region.x1)}' in s.code
     if region is not None:
         assert region.describe() in s.code        # the region is written out in words, too
-assert tte.SELECTION_SCRIPT_VERSION == '1.1'
+assert tte.SELECTION_SCRIPT_VERSION == '1.2'
 
 # The script must carry each column's coordinate keywords (TCTYPn, TCRPXn ...) into the file it writes: astropy
 # writes those from attributes of the column, so a rebuilt column loses them unless they are passed on. (Run just
@@ -50,4 +50,23 @@ hdu = types.SimpleNamespace(columns={'AXIS1': column}, data={'AXIS1': np.arange(
 namespace['stored_column'](hdu, 'AXIS1')
 assert made[0]['coord_ref_point'] == 512.5 and made[0]['coord_type'] == 'RA---TAN' and made[0]['coord_inc'] == -1e-6, made
 assert made[0]['format'] == 'I' and made[0]['unit'] == 'pixel'
+# EDGE_OK in the script is the Explorer's own edge trim (30, 6, 28, 6 hi-res pixels: left, right, bottom, top), event by
+# event: run the script's two lines of constants and its test on a row of events along each axis.
+from timetag_explorer.constants import EDGE_TRIM
+assert tuple(EDGE_TRIM) == (30, 6, 28, 6)
+axis = np.concatenate([np.arange(1, 70), np.arange(1980, 2049)])         # both ends of an axis
+xs, ys = np.concatenate([axis, np.full(axis.size, 1000)]), np.concatenate([np.full(axis.size, 1000), axis])
+trimmed = dataset(np.linspace(0, 99, xs.size), xs, ys)
+on = Corrections(randcorr=False, geocorr=False, flatcorr=False, timecorr=True)
+s = tte.build_selection_script(trimmed, (10.0, 20.0), Box(400, 600, 400, 600), 'image', on)
+names = {}
+exec('\n'.join(line for line in s.code.splitlines() if line.startswith('EDGE_')), names)
+assert (names['EDGE_X_LOW'], names['EDGE_X_HIGH'], names['EDGE_Y_LOW'], names['EDGE_Y_HIGH']) == (31, 2042, 29, 2042)
+x, y = trimmed.x, trimmed.y                                  # (time-ordered; the dataset sorts by time, which is already so)
+in_script = (x >= names['EDGE_X_LOW']) & (x <= names['EDGE_X_HIGH']) & (y >= names['EDGE_Y_LOW']) & (y <= names['EDGE_Y_HIGH'])
+assert '(x >= EDGE_X_LOW) & (x <= EDGE_X_HIGH) & (y >= EDGE_Y_LOW) & (y <= EDGE_Y_HIGH)' in s.code
+assert np.array_equal(in_script, trimmed.valid_events(on)) and not in_script.all() and in_script.any()
+for key, pixels in zip(('SELEDGEL', 'SELEDGER', 'SELEDGEB', 'SELEDGET'), EDGE_TRIM):
+    assert f"header['{key}'] = ({pixels}," in s.code, key
+assert 'left 30, right 6, bottom 28, top 6' in s.code
 print('selection script ok')
