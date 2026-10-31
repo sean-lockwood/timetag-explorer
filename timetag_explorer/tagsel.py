@@ -253,7 +253,7 @@ def primary_keywords(ds: TagDataset, time_sel: TimeSel | None, region: Region | 
     what = {'TTERAND': 'random sub-pixel offset', 'TTEGEO': 'geometric distortion',
             'TTEFLAT': 'flat-field weights FLATW', 'TTEVIGN': 'vignetting model VIGW',
             'TTEEDGE': 'edge-trim flag EDGE_OK'}   # (short: a FITS card holds 80 characters, value included)
-    keys = [(key, 'DONE' if done[key] else 'OMIT', f'{what[key]}: DONE or OMIT') for key in STEP_KEYWORDS]
+    keys = [(key, 'DONE' if done[key] else 'OMIT', what[key]) for key in STEP_KEYWORDS]
     if done['TTEFLAT']:
         keys.append(('TTEFFILE', config.FLAT_FILE.name, 'flat-field file used for FLATW'))
     keys += [('TTETSEL', time_sel is not None, 'a time selection was made (SEL_TIME)'),
@@ -361,16 +361,17 @@ def make_tagsel(rootname: str, *, time_sel: TimeSel | None = None, region: Regio
             for line in textwrap.wrap(text, 68):
                 header.add_history(line)
         primary = hdul[0].header
-        # One block at the end of the header, under a label card. (useblanks=False: the label is a blank-keyword card,
-        # which astropy would otherwise reuse as free space for the next keyword.) The calibration pipeline's own
-        # keywords are left exactly as they were.
+        # One block at the end of the header, under a label card. Every card is appended with end=True, at the very end:
+        # astropy puts an ordinary keyword before any trailing blank cards, and the label is a blank-keyword card, so
+        # without it each keyword would land above the label. The calibration pipeline's own keywords are left exactly
+        # as they were.
         keywords = primary_keywords(ds, time_sel, region, frame, corr, columns, script_version, tool_url)
         for key, _, _ in keywords:
             if key in primary:
                 del primary[key]
-        primary.append(('', f'/ {KEYWORD_GROUP}'), useblanks=False)
+        primary.append(('', f'/ {KEYWORD_GROUP}'), end=True)
         for card in keywords:
-            primary.append(card, useblanks=False)
+            primary.append(card, end=True)
         primary.add_history('Columns added to extension 1; see its HISTORY. The processing steps, the flat file and '
                             f'the selections are the {KEYWORD_GROUP.lower()} (TTE...) of this header.')
         hdul[1] = table

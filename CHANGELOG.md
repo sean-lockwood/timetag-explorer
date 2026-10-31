@@ -13,7 +13,15 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
-## [1.6.0] - Unreleased
+## [1.6.1] - Unreleased
+
+**Selection scripts (version 2.3): the header block is laid out as intended. No values, columns or numbers change.**
+
+* The `/ TIMETAG-EXPLORER KEYWORDS` label now sits directly above `TTERAND`; it had landed below the block, because astropy
+  places an ordinary keyword before any trailing blank cards. The cards are now appended at the very end of the header.
+* The step-flag comments no longer repeat `DONE or OMIT`.
+
+## [1.6.0] - 2026-10-30
 
 **Selection scripts (version 2.2): the primary-header keywords change. No computed numbers or columns change.**
 
