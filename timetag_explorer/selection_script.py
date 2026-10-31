@@ -120,11 +120,9 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
         weights.append('FLATW')
     if corr.vigcorr and ds.vignette_applies():
         weights.append('VIGW')
-    if weights:
-        weights.append('WEIGHT')
     if corr.flatcorr and ds.weight is None:
         warnings.append(f'No flat-field weights: {ds.flat_problem or "the flat field is not available here"}. The script '
-                        'downloads the flat field itself, so FLATW and WEIGHT are written if it can.')
+                        'downloads the flat field itself, so FLATW is written if it can.')
 
     notes = [
         f'Install the science code first: `{install}`. That is the version the Explorer ran ({__version__}); the script '
@@ -141,13 +139,16 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
                                                                                   corr.geocorr)) if on)
             + ' applied (hi-res pixels counted from 1, like AXIS1 and AXIS2).')
     notes.append('One pair of columns per reference frame the exposure supports, from those positions: `XREST`/`YREST` '
-                 '(target rest frame), `XRESTN`/`YRESTN` (rest frame, north up) and, for moon observations, '
-                 '`XPLAN`/`YPLAN`, `XPLANN`/`YPLANN` (planet rest frame, and north up). The planet frames need JPL '
-                 'Horizons ephemerides (a network connection). Planet maps are not included.')
+                 '(target rest frame) and, for moon observations, `XPLAN`/`YPLAN` (planet rest frame). The north-up '
+                 'versions (`XRESTN`/`YRESTN`, `XPLANN`/`YPLANN`) make the file much larger, so they are left out unless '
+                 'you set `INCLUDE_NORTH_UP = True` in the script. The planet frames need JPL Horizons ephemerides (a '
+                 'network connection). Planet maps are not included.')
     if weights:
-        notes.append('Weights: ' + ', '.join(f'`{w}`' for w in weights) + '. Sum `WEIGHT` over events for counts and '
-                     'divide by the exposure for rates; `FLATW` is the flat field at the recorded pixel, `VIGW` the '
-                     'experimental vignetting model (F25SRF2 only).')
+        notes.append('Weights: ' + ', '.join(f'`{w}`' for w in weights) + '. There is no combined weight column: an '
+                     'event counts as the product of the weights that exist (`FLATW` is the flat field at the '
+                     'recorded pixel, `VIGW` the experimental vignetting model, F25SRF2 only). The commented examples '
+                     'at the end of the script multiply them; sum the product over events for counts and divide by the '
+                     'exposure for rates.')
     if time_sel is not None:
         notes.append('The time cut compares the Explorer’s float32 copy of TIME, so it picks the same events as the plots.')
     if region is not None:
@@ -220,6 +221,7 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
     add(f'ROOTNAME = {root!r}')
     add("FOLDER = '.'                  # where the files are (downloaded here if missing) and the output is written")
     add('OVERWRITE = False             # True: replace the output if it exists already')
+    add('INCLUDE_NORTH_UP = False      # True: also write the north-up frame columns (XRESTN, YRESTN, ...); a larger file')
     add('ALLOW_OTHER_VERSION = False   # True: run with another timetag-explorer version (the numbers may differ)')
     add('')
     add('# ---- the selections ------------------------------------------------------------------')
@@ -244,33 +246,89 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
     add('')
     add('OUTPUT = make_tagsel(')
     add('    ROOTNAME, time_sel=TIME_WINDOW, region=REGION, frame=REGION_FRAME, corr=CORRECTIONS,')
-    add('    script_version=SCRIPT_VERSION, tool_url=TOOL_URL, folder=FOLDER, overwrite=OVERWRITE)')
-    # A commented-out example of using the output: an image from the added columns. It names columns this script
-    # writes, so it works as it stands.
-    add('')
-    add('')
-    add('# ---- Example (commented out): the selected events as an image --------------------------------')
-    add('# Needs matplotlib:  pip install matplotlib')
-    add('#')
-    add('# import numpy as np')
-    add('# from astropy.table import Table')
-    add('# from matplotlib import pyplot as plt')
-    add('#')
-    add('# t = Table.read(OUTPUT, hdu=1)')
-    if flags:
-        add('# keep = np.logical_and.reduce([t[name] for name in ' + repr(tuple(flags)) + '])   # every flag set')
-    else:
-        add('# keep = np.ones(len(t), dtype=bool)   # this script wrote no flag columns, so every event')
+    add('    script_version=SCRIPT_VERSION, tool_url=TOOL_URL, north_up=INCLUDE_NORTH_UP, folder=FOLDER,')
+    add('    overwrite=OVERWRITE)')
+    # Commented-out examples of using the output. They name only columns this script writes, so they work as they stand.
+    # Both build `keep` one flag per line (`keep &= ...`, so a line can be negated or commented out) and weight events by
+    # FLATW x VIGW, whichever of those exist. Rates need the exposure, so they walk the GTI table; when SEL_TIME is in
+    # `keep`, the time range is the selection window, from the primary header.
     x, y = ('XCORR', 'YCORR') if corrected else ('AXIS1', 'AXIS2')
-    add(f"# x, y = t['{x}'][keep], t['{y}'][keep]   # hi-res pixels, counted from 1")
-    add("# w = t['WEIGHT'][keep]" if weights else '# w = None   # no weights were written')
-    add('# BIN = 2    # hi-res pixels per image pixel: 1 gives 2048 x 2048, 2 gives the 1024 x 1024 low-res image')
-    add('# n = 2048 // BIN')
-    add('# edge = 0.5 + n * BIN   # pixel k covers k - 0.5 to k + 0.5')
-    add('# image, _, _ = np.histogram2d(y, x, bins=n, range=[[0.5, edge], [0.5, edge]], weights=w)   # rows are y')
-    add("# plt.imshow(image, origin='lower', extent=(0.5, edge, 0.5, edge), cmap='inferno')")
-    add("# plt.colorbar(label='counts'); plt.xlabel('x (hi-res pixel)'); plt.ylabel('y (hi-res pixel)')")
-    add('# plt.show()')
+
+    def keep_lines():
+        out = ['# keep = np.ones(len(t), dtype=bool)']
+        out += [f"# keep &= t['{name}']" for name in flags]
+        if not flags:
+            out[0] += '   # this script wrote no flag columns, so every event'
+        return out
+
+    def weight_lines():
+        names = weights
+        out = ['# w = np.ones(len(t))   # an event counts as the product of its weights']
+        out += [f"# w *= t['{name}']" for name in names]
+        if not names:
+            out[0] += ' (this script wrote no weights, so each event counts 1)'
+        return out
+
+    def window_lines():
+        if time_sel is not None:
+            return ['# # SEL_TIME is in keep: the exposure is only the selected window (switch this with the SEL_TIME line)',
+                    "# hdr = fits.getheader(OUTPUT, 0)",
+                    "# t0, t1 = hdr['SELTMIN'], hdr['SELTMAX']   # seconds since the exposure start",
+                    '# # without the SEL_TIME line, use the whole exposure instead:  t0, t1 = 0.0, gti["STOP"].max()']
+        return ['# t0, t1 = 0.0, gti["STOP"].max()   # the whole exposure']
+
+    imports = ['# import warnings', '# import numpy as np', '# from astropy.io import fits',
+               '# from astropy.table import Table', '# from astropy.units import UnitsWarning',
+               '# from matplotlib import pyplot as plt']
+    read = ['# # STIS writes the unit "seconds", which the FITS standard does not know; astropy warns, harmlessly',
+            '# with warnings.catch_warnings():',
+            "#     warnings.filterwarnings('ignore', category=UnitsWarning, message='.*did not parse as fits unit.*')",
+            "#     t = Table.read(OUTPUT, hdu=1)",
+            "#     gti = Table.read(OUTPUT, hdu='GTI')"]
+    L.extend(['', '',
+              '# ---- Example 1 (commented out): a light curve, weighted counts per second --------------------',
+              '# Needs matplotlib:  pip install matplotlib', '#'])
+    L.extend(imports)
+    L.append('#')
+    L.extend(read)
+    L.append('#')
+    L.extend(keep_lines())
+    L.extend(weight_lines())
+    L.append('#')
+    L.extend(window_lines())
+    L.append('# BIN = 10.0   # seconds per light-curve bin')
+    L.append('# edges = np.append(np.arange(t0, t1, BIN), t1)   # the last bin is shorter if BIN does not divide t1 - t0')
+    L.append('# lo, hi = edges[:-1], edges[1:]')
+    L.append("# counts, _ = np.histogram(t['TIME'][keep], bins=edges, weights=w[keep])   # weighted counts per bin")
+    L.append("# # exposure per bin: the overlap of each good time interval with the bin")
+    L.append("# exposure = np.clip(np.minimum(gti['STOP'][:, None], hi) - np.maximum(gti['START'][:, None], lo),"
+             " 0, None).sum(axis=0)")
+    L.append("# rate = np.divide(counts, exposure, out=np.full(len(counts), np.nan), where=exposure > 0)   # counts / s")
+    L.append("# plt.step(lo, rate, where='post'); plt.xlabel('time since exposure start (s)'); plt.ylabel('count rate (counts / s)')")
+    L.append('# plt.show()')
+    L.extend(['', '',
+              '# ---- Example 2 (commented out): the selected events as an image, in counts per second ----------',
+              '# Needs matplotlib:  pip install matplotlib', '#'])
+    L.extend(imports)
+    L.append('#')
+    L.extend(read)
+    L.append('#')
+    L.extend(keep_lines())
+    L.extend(weight_lines())
+    L.append('#')
+    L.extend(window_lines())
+    L.append('# # the exposure (s) in the window: the good time intervals clipped to it')
+    L.append("# exposure = np.clip(np.minimum(gti['STOP'], t1) - np.maximum(gti['START'], t0), 0, None).sum()")
+    L.append('#')
+    L.append(f"# xs, ys = t['{x}'][keep], t['{y}'][keep]   # hi-res pixels, counted from 1")
+    L.append('# BIN = 2    # hi-res pixels per image pixel: 1 gives 2048 x 2048, 2 gives the 1024 x 1024 low-res image')
+    L.append('# n = 2048 // BIN')
+    L.append('# edge = 0.5 + n * BIN   # pixel k covers k - 0.5 to k + 0.5')
+    L.append('# counts, _, _ = np.histogram2d(ys, xs, bins=n, range=[[0.5, edge], [0.5, edge]], weights=w[keep])   # rows are y')
+    L.append('# image = counts / exposure   # counts / s per image pixel')
+    L.append("# plt.imshow(image, origin='lower', extent=(0.5, edge, 0.5, edge), cmap='inferno')")
+    L.append("# plt.colorbar(label='counts / s'); plt.xlabel('x (hi-res pixel)'); plt.ylabel('y (hi-res pixel)')")
+    L.append('# plt.show()')
     packages = (('timetag-explorer', 'the Explorer’s own code: corrections, reference frames, planet frames; '
                                      'it brings numpy, astropy, matplotlib and astroquery'),)
     return SelectionScript(code='\n'.join(L) + '\n', filename=f'select_{root}.py', packages=packages,
