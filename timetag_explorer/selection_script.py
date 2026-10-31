@@ -18,7 +18,7 @@ from . import __version__, config
 from .constants import DEFAULT_TOOL_URL, EDGE_TRIM, RANDOM_SEED, SELECTION_SCRIPT_VERSION, TIME_DECIMALS, TimeSel
 from .dataset import TagDataset
 from .frames import Corrections, frame_label, is_map
-from .regions import Region
+from .regions import Region, region_source
 from .tagsel import EDGE_TRIM_TEXT
 
 PACKAGE = 'timetag-explorer'
@@ -229,7 +229,7 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
         add('TIME_WINDOW = None')
     if region is not None:
         add(f'# Drawn in the {label}; coordinates are 0-indexed hi-res detector pixels (AXIS1 and AXIS2 count from 1).')
-        add(f'REGION = {region!r}')
+        add(f'REGION = {region_source(region)}')
     else:
         add('REGION = None')
     add(f'REGION_FRAME = {frame if region is not None else "image"!r}')

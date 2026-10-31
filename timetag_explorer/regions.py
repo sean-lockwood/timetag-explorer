@@ -65,3 +65,14 @@ class Polygon:
         return out
 
 Region = Union[Box, Circle, Polygon]
+
+
+def region_source(region: Region) -> str:
+    """Python that rebuilds a region, with plain floats. (The repr of a region drawn in the app holds numpy floats, which
+    NumPy 2 writes as `np.float64(508.08)`: that would need numpy imported wherever the text is run.)"""
+    f = lambda v: repr(float(v))  # noqa: E731  (exact literals)
+    if isinstance(region, Box):
+        return f'Box(x0={f(region.x0)}, x1={f(region.x1)}, y0={f(region.y0)}, y1={f(region.y1)})'
+    if isinstance(region, Circle):
+        return f'Circle(cx={f(region.cx)}, cy={f(region.cy)}, r={f(region.r)})'
+    return 'Polygon(points=(' + ', '.join(f'({f(x)}, {f(y)})' for x, y in region.points) + ',))'

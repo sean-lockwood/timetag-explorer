@@ -33,7 +33,7 @@ from . import config
 from .constants import EDGE_TRIM, FLAT_URL, RANDOM_SEED, TIME_DECIMALS, TimeSel
 from .dataset import TagDataset, _is_sorted, load_dataset
 from .frames import FRAMES, Corrections, frame_label, is_map, is_planet
-from .regions import Region
+from .regions import Region, region_source
 from .transforms import frame_coordinates, load_geo_lut
 
 # Columns of the positions in each reference frame (the image frame is XCORR / YCORR).
@@ -100,7 +100,7 @@ def selection_columns(ds: TagDataset, time_sel: TimeSel | None, region: Region |
             flags['SEL_REGION'] = np.asarray(region.contains(u, v), dtype=bool)
             out.history.append(f'SEL_REGION: True for events inside this region of the {frame_label(ds.frame_info, f)}, '
                                f'tested at each event\'s own position: {region.describe()}')
-            out.history.append('Region, unrounded: ' + repr(region))
+            out.history.append('Region, unrounded: ' + region_source(region))
         if f == 'image':
             if corrected:
                 positions['XCORR'], positions['YCORR'] = _one_based(u), _one_based(v)
