@@ -205,8 +205,8 @@ COORDINATE_ATTRIBUTES = ('coord_type', 'coord_unit', 'coord_ref_point', 'coord_r
 def stored_column(hdu, name):
     """One column of the TAG table as a new, unscaled column.
 
-    Columns such as TIME are stored as scaled integers (TSCAL / TZERO). astropy hands out their real values, so they
-    are written back as plain floating point: re-using the old column definition would make astropy try to scale the
+    A column stored with a scale (TSCAL / TZERO) is handed out by astropy with its real values, so it is written
+    back as plain floating point: re-using the old column definition would make astropy try to scale the
     values back, and fail.
     """
     column = hdu.columns[name]
@@ -340,8 +340,7 @@ def make_tagsel(rootname: str, *, time_sel: TimeSel | None = None, region: Regio
                f'run {datetime.now(timezone.utc):%Y-%m-%d} UTC',
                f'Tool: {tool_url}',
                'Not an STScI calibrated product: the raw _tag table plus the added columns',
-               'Existing columns keep their values (AXIS1 and AXIS2 are the recorded integer pixels); '
-               'scaled ones (TIME) are stored as plain floating point']
+               'Existing columns keep their values (AXIS1 and AXIS2 are the recorded integer pixels)']
     history += columns.history
     history.append('Positions are hi-res pixels counted from 1, like AXIS1 and AXIS2; float32')
     history.append('Which steps were performed, the selections made and the versions are keywords of the primary header')

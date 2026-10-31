@@ -198,8 +198,7 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
     if flags and 'EDGE_OK' in flags:
         notes.append(f'`EDGE_OK` is the Explorer’s detector-edge trim ({EDGE_TRIM_TEXT} pixels); it is not applied to '
                      'the other columns, which cover every event.')
-    notes.append('TIME is stored in the TAG file as a scaled integer; the output holds the same values as plain 64-bit '
-                 'floating point, so it is a little larger. Other original columns are unchanged.')
+    notes.append('The original columns are unchanged.')
     if time_sel is None and region is None:
         notes.append('No time range or region was selected, so the file has no `SEL_TIME` / `SEL_REGION` columns '
                      '(`TTETSEL` and `TTERSEL` are False): the corrections, positions and weights are still written.')
@@ -333,7 +332,7 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
     L.extend(weight_lines())
     L.append('#')
     L.extend(window_lines())
-    L.append('# BIN = 10.0   # seconds per light-curve bin')
+    L.append('# BIN = 3.0   # seconds per light-curve bin')
     L.append('# edges = np.append(np.arange(t0, t1, BIN), t1)   # the last bin is shorter if BIN does not divide t1 - t0')
     L.append('# lo, hi = edges[:-1], edges[1:]')
     L.append("# counts, _ = np.histogram(t['TIME'][keep], bins=edges, weights=w[keep])   # weighted counts per bin")

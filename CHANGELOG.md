@@ -13,6 +13,14 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
+## [1.6.2] - Unreleased
+
+**Wording and an example default; no values, columns or numbers change (selection script stays 2.3).**
+
+* The commented light-curve example in a generated script now starts with `BIN = 3.0` seconds.
+* Removed the statement that `TIME` is stored as a scaled integer in the TAG file and written as 64-bit floating point:
+  `TIME` is already 64-bit there. (Any column that does carry a scale is still written unscaled.)
+
 ## [1.6.1] - Unreleased
 
 **Selection scripts (version 2.3): the header block is laid out as intended. No values, columns or numbers change.**
