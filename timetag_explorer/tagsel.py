@@ -277,6 +277,10 @@ def primary_keywords(ds: TagDataset, time_sel: TimeSel | None, region: Region | 
     return keys
 
 
+# STIS tables write the units 'seconds' and 'pixels', which the FITS standard does not list; astropy warns once per column
+UNIT_WARNING_PATTERN = r'.*did not parse as fits unit.*'
+
+
 def _quiet_unit_warning(function):
     """Run `function` without astropy's warning that 'seconds' (the unit STIS writes for TIME) is not a FITS-standard
     unit name. The FITS unit parser accepts only the standard names, so a custom unit cannot be enabled for it; the
@@ -284,7 +288,7 @@ def _quiet_unit_warning(function):
     @functools.wraps(function)
     def wrapper(*args, **kwargs):
         with warnings.catch_warnings():
-            warnings.filterwarnings('ignore', category=UnitsWarning, message=r'.*did not parse as fits unit.*')
+            warnings.filterwarnings('ignore', category=UnitsWarning, message=UNIT_WARNING_PATTERN)
             return function(*args, **kwargs)
     return wrapper
 

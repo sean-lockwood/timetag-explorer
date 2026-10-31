@@ -39,7 +39,7 @@ class Corrections:
     vigbot_start: float = 430.0
     vigbot_end: float = 0.0
     vigbot_loss: float = 0.25
-    vigtop_start: float = 1550.0
+    vigtop_start: float = 1400.0
     vigtop_end: float = 2047.0
     vigtop_loss: float = 0.23
     # Planet maps and the limb overlay: offset added to the planet centre guessed from the

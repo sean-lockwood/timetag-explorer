@@ -130,6 +130,28 @@ archive = json.dumps({'url': 'https://github.com/sean-lockwood/timetag-explorer/
 assert spec_for(archive) == ('timetag-explorer @ https://github.com/sean-lockwood/timetag-explorer/archive/c24f0f78.zip', None)
 spec, warning = spec_for(json.dumps({'url': 'file:///home/me/timetag-explorer', 'dir_info': {'editable': True}}))
 assert spec == f'timetag-explorer=={v}' and 'development copy' in warning
+
+# the unit warnings STIS tables trigger ('seconds' in TIME, 'pixels' in AXIS1 and AXIS2) are matched by the filter
+import re
+for unit in ('seconds', 'pixels'):
+    assert re.match(tagsel.UNIT_WARNING_PATTERN, f"'{unit}' did not parse as fits unit: At col 0, Unit '{unit}' not supported by the FITS standard. Did you mean pixel?")
+assert tagsel.UNIT_WARNING_PATTERN in selection_script.build_selection_script(ds, None, None, 'image', OFF).code.replace("'.*did not parse as fits unit.*'", tagsel.UNIT_WARNING_PATTERN)
+
+# the short label for a page footer
+def label_for(direct_url):
+    real = selection_script.metadata.distribution
+    selection_script.metadata.distribution = lambda name: FakeDistribution(direct_url)
+    try:
+        return tte.package_version_label()
+    finally:
+        selection_script.metadata.distribution = real
+
+assert label_for(None) == v
+assert label_for(git) == f'{v} (branch @ abc123)'
+assert label_for(json.dumps({'url': 'https://x/timetag-explorer', 'vcs_info': {'vcs': 'git', 'commit_id': 'abc1234def'}})) == f'{v} (@ abc1234)'
+assert label_for(archive) == f'{v} (archive)'
+dev = label_for(json.dumps({'url': 'file:///home/me/timetag-explorer', 'dir_info': {'editable': True}}))
+assert dev.startswith(f'{v} (dev') and dev.endswith(')'), dev            # (with ", branch @ hash" inside a git checkout)
 assert selection_script.pip_command('timetag-explorer @ https://x/y.zip') == 'pip install "timetag-explorer @ https://x/y.zip"'
 
 # ---- the columns ---------------------------------------------------------------------------------------------------
@@ -296,7 +318,7 @@ assert header(None, None, 'image', vig, other_ap)['VIGNCORR'] == 'OMIT'
 sens.aperture = 'F25SRF2'
 h = header(None, None, 'image', vig, sens)
 assert h['VIGNCORR'] == 'PERFORM' and (h['VIGBSTRT'], h['VIGBEND'], h['VIGBLOSS']) == (128.0, 28.0, 0.05)
-assert (h['VIGTSTRT'], h['VIGTEND'], h['VIGTLOSS']) == (1550.0, 2047.0, 0.23)
+assert (h['VIGTSTRT'], h['VIGTEND'], h['VIGTLOSS']) == (1400.0, 2047.0, 0.23)
 assert all(len(k) <= 8 for k in h)                          # FITS keywords
 
 # ---- helpers for the file ------------------------------------------------------------------------------------------

@@ -10,9 +10,11 @@ computes or writes."""
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from importlib import metadata
+from pathlib import Path
 
 from . import __version__, config
 from .constants import DEFAULT_TOOL_URL, EDGE_TRIM, RANDOM_SEED, SELECTION_SCRIPT_VERSION, TIME_DECIMALS, TimeSel
@@ -38,6 +40,40 @@ class SelectionScript:
 def tool_url() -> str:
     """Web address of this tool, for the scripts and FITS headers it writes."""
     return config.PUBLIC_URL or DEFAULT_TOOL_URL
+
+
+def package_version_label() -> str:
+    """Which copy of this package is running, for a page footer: `1.5.0` for a release, `1.5.0 (branch @ abc1234)` for a
+    copy installed from git (the branch or tag pip was given, and the commit), `1.5.0 (archive)` for an archive address,
+    and for a development copy `1.5.0 (dev, branch @ abc1234)` when its folder is a git checkout, else `1.5.0 (dev)`."""
+    try:
+        raw = metadata.distribution(PACKAGE).read_text('direct_url.json')
+        info = json.loads(raw) if raw else None
+    except (metadata.PackageNotFoundError, ValueError):
+        info = None
+    if not info:
+        return __version__
+    vcs = info.get('vcs_info') or {}
+    if str(info.get('url', '')).startswith(('http://', 'https://')):
+        if vcs.get('vcs') == 'git' and vcs.get('commit_id'):
+            ref = vcs.get('requested_revision')
+            commit = vcs['commit_id'][:7]
+            return f'{__version__} ({ref} @ {commit})' if ref and not str(ref).startswith(commit) else f'{__version__} (@ {commit})'
+        if 'archive_info' in info:
+            return f'{__version__} (archive)'
+    return f'{__version__} (dev{_checkout_label()})'
+
+
+def _checkout_label() -> str:
+    """`, branch @ abc1234` when this package's folder is a git checkout (a development copy), else nothing."""
+    folder = Path(__file__).resolve().parent
+    try:
+        out = [subprocess.run(['git', '-C', str(folder), *args], capture_output=True, text=True, timeout=5,
+                              check=True).stdout.strip() for args in (('rev-parse', '--abbrev-ref', 'HEAD'),
+                                                                       ('rev-parse', '--short=7', 'HEAD'))]
+    except (OSError, subprocess.SubprocessError):
+        return ''
+    return f', {out[0]} @ {out[1]}' if all(out) else ''
 
 
 def package_install_spec() -> tuple[str, str | None]:

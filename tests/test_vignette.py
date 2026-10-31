@@ -36,8 +36,8 @@ assert np.allclose(event_gain(x[:2], [29, 30], bottom, top, lut), [1 / 0.975, 1 
 c = Corrections()
 assert not c.vigcorr and c.vignette_ramps() is None
 assert (c.vigbot_start, c.vigbot_end, c.vigbot_loss) == (430.0, 0.0, 0.25)
-assert (c.vigtop_start, c.vigtop_end, c.vigtop_loss) == (1550.0, 2047.0, 0.23)
-assert replace(c, vigcorr=True).vignette_ramps() == ((430.0, 0.0, 0.25), (1550.0, 2047.0, 0.23))
+assert (c.vigtop_start, c.vigtop_end, c.vigtop_loss) == (1400.0, 2047.0, 0.23)
+assert replace(c, vigcorr=True).vignette_ramps() == ((430.0, 0.0, 0.25), (1400.0, 2047.0, 0.23))
 assert VIGNETTE_APERTURE == 'F25SRF2'
 
 # counts: ten events in the row of the bottom ramp's end, ten in the top ramp's, ten in the middle

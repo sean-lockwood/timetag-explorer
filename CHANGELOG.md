@@ -16,8 +16,12 @@ to the version that made it.
 ## [1.5.0] - Unreleased
 
 **Selection scripts (version 2.1): the output file is smaller and the examples are rate-based. The corrected
-positions and the `FLATW` and `VIGW` values are unchanged.**
+positions and the `FLATW` values are unchanged; `VIGW` changes only through the new vignetting default below.**
 
+* **Vignetting model (experimental, off by default): the default start row of the top ramp is now 1400 (was 1550).**
+  With the model on and the old default, results move; set `vigtop_start=1550.0` to reproduce them.
+* New `package_version_label()`: a short text for the running copy (`1.5.0`, or `1.5.0 (branch @ abc1234)` for a git
+  install, or `1.5.0 (dev, branch @ abc1234)` for a development checkout), used by the Explorer's page footer.
 * The north-up frame columns (`XRESTN`/`YRESTN`, `XPLANN`/`YPLANN`) are no longer written unless the script sets
   `INCLUDE_NORTH_UP = True` (`make_tagsel(..., north_up=True)`), because they make the data product large. A region drawn
   in a north-up frame is still tested in it.
