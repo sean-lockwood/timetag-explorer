@@ -187,14 +187,22 @@ class TagDataset:
         ramps = corr.vignette_ramps()
         return None if ramps is None or not self.vignette_applies() else (ramps, corr.geocorr)
 
+    def vignette_gain(self, corr: Corrections, lo: int = 0, hi: int | None = None) -> np.ndarray | None:
+        """The vignetting model's weight of events lo:hi (float32), or None when it is not applied (off, or not an
+        F25SRF2 exposure). It is read at each event's row once distortion-corrected."""
+        if self._vignette_key(corr) is None:
+            return None
+        hi = len(self.time) if hi is None else hi
+        bottom, top = corr.vignette_ramps()
+        y_offset = load_geo_lut()[1] if corr.geocorr else None
+        return event_gain(self.x[lo:hi], self.y[lo:hi], bottom, top, y_offset)
+
     def _event_weights(self, corr: Corrections, lo: int, hi: int) -> np.ndarray | None:
         """Weights of events lo:hi: the flat-field weight, times (experimental) the vignetting gain at the event's
         row once distortion-corrected; None when neither applies."""
         weights = self.weight[lo:hi] if corr.flatcorr and self.weight is not None else None
-        if self._vignette_key(corr) is not None:
-            bottom, top = corr.vignette_ramps()
-            y_offset = load_geo_lut()[1] if corr.geocorr else None
-            gain = event_gain(self.x[lo:hi], self.y[lo:hi], bottom, top, y_offset)
+        gain = self.vignette_gain(corr, lo, hi)
+        if gain is not None:
             weights = gain if weights is None else weights * gain
         return weights
 

@@ -1,13 +1,13 @@
 """TIME-TAG Explorer science code: the calculations behind the web app for HST/STIS FUV TIME-TAG data.
 
 This package has no web-server code. It reads a TIME-TAG (and SPT) file, applies the processing steps, transforms
-positions between reference frames and planet maps, and writes the standalone selection scripts.
+positions between reference frames and planet maps, and writes the short selection scripts that call it.
 
     from timetag_explorer import TagDataset, Corrections, Box
 """
 from __future__ import annotations
 
-__version__ = '1.3.0'
+__version__ = '1.4.0'
 
 from .analysis import describe_selection
 from .constants import SELECTION_SCRIPT_VERSION

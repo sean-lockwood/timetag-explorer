@@ -27,12 +27,14 @@ How to read the columns:
 | 11 | Map frames (longitude/latitude, polar) and surface area of a map bin | `planet.map_plane_coordinates`, `.map_bin_area` | spherical and spheroidal geometry | `test_planet` (whole-sphere and polar-cap areas) | not reviewed |
 | 12 | Map brightness: counts over the pixel-seconds that saw each bin | `transforms.map_exposure_from_knots`, `dataset.TagDataset.map_exposure` | derived in the code comments | none yet | not reviewed |
 | 13 | Region membership (box, circle, polygon) | `regions` | half-open boxes; closed circles; even-odd polygon test | `test_regions` | not reviewed |
-| 14 | Selection scripts: the flags they write equal the app's own masks, event by event | `selection_script` | the app's masks (steps 1, 6, 7, 13) | `test_selection_script` (script is valid, versioned); `validation/check_selection_scripts.py` (weekly, real data) | not reviewed |
+| 14 | Selection scripts: the flags, corrected positions and weights they write equal the app's own numbers, event by event (the region is tested at each event's position, not on bins) | `selection_script`, `tagsel` | the app's own functions (steps 1, 3, 4, 6, 6a, 7, 8, 13) | `test_selection_script` (script is valid, versioned); `validation/check_selection_scripts.py` (weekly, real data) | not reviewed |
 
 ## Known gaps
 
 * Step 5 is disabled, so nothing about the distortion correction is validated or used.
 * Steps 7, 8 and 12 have no known-answer test yet; they are only exercised end to end.
+* Step 14 reads and writes FITS files, which the quick tests do not do (they run without astropy's file I/O):
+  the weekly `check_selection_scripts.py` run on a real exposure is what covers it.
 * The tests run on synthetic data or on one real exposure; no comparison with an independent code (calstis, for
   example) has been made.
 

@@ -1,17 +1,17 @@
 #!/usr/bin/env python
 """Run the selection scripts the TIME-TAG Explorer generates, and check what they write.
 
-For one exposure this builds a script for each combination of switches, reference frame, region tool and
-selection (time, space or both), runs each one in a fresh folder with the real astropy, and compares the
-flag columns it wrote with the Explorer's own masks, event by event. It also checks that the TAG file's
-own columns and tables come through unchanged, and the header keywords and HISTORY.
+For one exposure this builds a script for each combination of switches, reference frame, region tool and selection
+(time, space or both), runs each one in a fresh folder with the real astropy (the scripts call this checkout's
+`timetag_explorer.tagsel`), and compares the columns each writes with the Explorer's own numbers, event by event: the
+flags, the corrected positions (XCORR, YCORR and one pair per reference frame) and the weights. It also checks that the
+TAG file's own columns and tables come through unchanged, and the header keywords and HISTORY.
 
 The data are downloaded once and shared by every run:
-  * the first script is run in the empty data folder, so it downloads the TAG file itself from MAST: that
-    tests the download code and is the only request to MAST (use --skip-download-test to fetch the file from
-    AWS S3 instead);
-  * the SPT file (needed for the rest frames) comes from AWS S3, or MAST if S3 is not available;
-  * every other run gets a link to that one file, so nothing else is downloaded.
+  * the first script is run in the empty data folder, so it downloads the TAG file, the SPT file and the flat field
+    itself: that tests the download code and is the only request to MAST and the flat-field site (use
+    --skip-download-test to fetch the TAG and SPT files from AWS S3 instead; the flat field then comes from its site);
+  * every other run gets links to those files, so nothing else is downloaded.
 
 Usage:
     python validation/check_selection_scripts.py OFAP44G5Q                 # a quick pass: corrections all on, all off
@@ -22,9 +22,9 @@ Usage:
 Needs the package's own requirements (pip install -e .) from a checkout of the repository; s3fs is optional (without it
 the files come from MAST). Run it from the repository's top folder.
 
-The flat-field switch is not a case: the scripts do not apply flats, so it changes nothing. Planet frames and
-maps are off unless --planet-frames is given (they need JPL Horizons, and a moon or planet observation); the
-scripts for those hold only the region's definition, so they are checked for the time flag and the columns.
+Planet frames are off unless --planet-frames is given (they need JPL Horizons, and a moon observation). The region is
+tested at each event's own position, so besides the event-by-event comparison this checks that the Explorer's own
+binned highlight (4-pixel bins) agrees with it except near the region's edge.
 """
 from __future__ import annotations
 
@@ -46,13 +46,13 @@ import numpy as np
 HERE = Path(__file__).resolve().parent.parent      # the repository's top folder
 HST_S3_BUCKET, HST_S3_PREFIX = 'stpubdata', 'hst/public'    # the public HST archive on AWS
 PIXEL_FRAMES = ('image', 'rest', 'rest_north')
-PLANET_FRAMES = ('planet', 'planet_north', 'map_rect', 'map_north', 'map_south')
+PLANET_FRAMES = ('planet', 'planet_north')
 SHAPES = ('box', 'circle', 'polygon')
-SELECTIONS = ('time', 'space', 'both')
-# (randcorr, geocorr, timecorr): "quick" is everything on and everything off, "all" is every combination
+SELECTIONS = ('time', 'space', 'both', 'none')
+# (randcorr, geocorr, flatcorr, timecorr): "quick" is everything on and everything off, "all" is every combination
 SWITCH_SETS = {
-    'quick': [(True, True, True), (False, False, False)],
-    'all': list(itertools.product((True, False), repeat=3)),
+    'quick': [(True, True, True, True), (False, False, False, False)],
+    'all': list(itertools.product((True, False), repeat=4)),
 }
 
 
@@ -103,21 +103,23 @@ def ensure_files(rootname, folder):
 # ---- the cases ---------------------------------------------------------------------------------------------
 
 def make_cases(frames, shapes, selections, switches):
-    """(frame, shape, selection, (rand, geo, edge)) for every distinct script.
+    """(frame, shape, selection, (rand, geo, flat, edge)) for every distinct script.
 
-    A time-only script does not depend on the frame or the shape, so it is listed once, as 'image'."""
+    A time-only (or no-selection) script does not depend on the frame or the shape, so it is listed once, as 'image'."""
     cases = []
     for sw in switches:
         if 'time' in selections:
             cases.append(('image', None, 'time', sw))
-        for frame, shape, selection in itertools.product(frames, shapes, [s for s in selections if s != 'time']):
+        if 'none' in selections:       # no selection: the corrections alone
+            cases.append(('image', None, 'none', sw))
+        for frame, shape, selection in itertools.product(frames, shapes, [s for s in selections if s not in ('time', 'none')]):
             cases.append((frame, shape, selection, sw))
     return cases
 
 
 def case_name(case):
-    frame, shape, selection, (rand, geo, edge) = case
-    flags = ''.join(c if on else '-' for c, on in zip('RGE', (rand, geo, edge)))
+    frame, shape, selection, (rand, geo, flat, edge) = case
+    flags = ''.join(c if on else '-' for c, on in zip('RGFE', (rand, geo, flat, edge)))
     return f'{frame}/{shape or "-"}/{selection}/{flags}'
 
 
@@ -172,37 +174,68 @@ def to_file_order(flag, order):
     return out
 
 
-def reference_flags(te, ds, order, case, time_sel, region):
-    frame, shape, selection, (rand, geo, edge) = case
-    corr = te.Corrections(randcorr=rand, geocorr=geo, timecorr=edge)
-    flags = {}
-    if selection in ('time', 'both'):
+def reference_columns(te, ds, order, case, time_sel, region):
+    """The columns the script should write (in the file's row order), from the Explorer's own functions, in the order
+    they are written: flags, then positions, then weights."""
+    frame, shape, selection, (rand, geo, flat, edge) = case
+    corr = te.Corrections(randcorr=rand, geocorr=geo, flatcorr=flat, timecorr=edge)
+    flags, positions, weights = {}, {}, {}
+    if time_sel is not None:
         lo, hi = np.searchsorted(ds.time, time_sel)
         m = np.zeros(len(ds.time), dtype=bool)
         m[lo:hi] = True
-        flags['SEL_TIME'] = to_file_order(m, order)
-    if region is not None and frame in PIXEL_FRAMES:
-        flags['SEL_REGION'] = to_file_order(ds.region_mask(region, frame, corr), order)
-    if edge and any(te.EDGE_TRIM):
-        ok = ds.valid_events(corr)
-        flags['EDGE_OK'] = to_file_order(np.ones(len(ds.time), bool) if ok is None else ok, order)
-    return flags
+        flags['SEL_TIME'] = m
+    geo_lut = te.load_geo_lut() if geo else None
+    xy = lambda f: te.frame_coordinates(ds.x, ds.y, ds.time, ds.frame_info, f, corr, seed=te.RANDOM_SEED,
+                                        geo_lut=geo_lut, track=ds.planet_track() if f in PLANET_FRAMES else None)
+    if region is not None:
+        flags['SEL_REGION'] = np.asarray(region.contains(*xy(frame)), dtype=bool)   # at each event's own position
+    valid = ds.valid_events(corr)
+    if valid is not None:
+        flags['EDGE_OK'] = np.array(valid, dtype=bool)
+    for f, names in (('image', ('XCORR', 'YCORR')),) + tuple(te.POSITION_COLUMNS.items()):
+        if f == 'image' and not (rand or geo):
+            continue
+        try:
+            if f != 'image':
+                ds.prepare_frame(f)
+        except ValueError:
+            continue          # a frame this exposure does not have: no columns
+        u, v = xy(f)
+        positions[names[0]], positions[names[1]] = u + np.float32(1.0), v + np.float32(1.0)
+    flat_w = ds.weight if flat and ds.weight is not None else None
+    gain = ds.vignette_gain(corr)
+    if flat_w is not None:
+        weights['FLATW'] = np.asarray(flat_w, dtype=np.float32)
+    if gain is not None:
+        weights['VIGW'] = gain
+    if weights:
+        weights['WEIGHT'] = (flat_w if gain is None else gain if flat_w is None else flat_w * gain).astype(np.float32)
+    return {name: to_file_order(values, order) for name, values in {**flags, **positions, **weights}.items()}
 
 
 # ---- running and checking one script -----------------------------------------------------------------------------
 
-def run_script(code, filename, tag_path, folder, timeout):
-    """Run the script in a fresh folder holding only a link to the shared TAG file."""
+def link_file(source, folder):
+    link = folder / source.name
+    if link != source and not link.exists():   # (the download test runs in the data folder itself)
+        try:
+            os.symlink(source, link)
+        except OSError:   # e.g. Windows without the privilege
+            shutil.copyfile(source, link)
+
+
+def run_script(code, filename, tag_path, folder, timeout, shared=()):
+    """Run the script in a fresh folder holding only links to the shared files (TAG, SPT, flat field). The script
+    imports this checkout's package; the planet-frame ephemerides are kept in one shared folder."""
     folder.mkdir(parents=True, exist_ok=True)
     (folder / filename).write_text(code)
-    link = folder / tag_path.name
-    if link != tag_path and not link.exists():   # (the download test runs in the data folder itself)
-        try:
-            os.symlink(tag_path, link)
-        except OSError:   # e.g. Windows without the privilege
-            shutil.copyfile(tag_path, link)
+    for source in (tag_path, *shared):
+        link_file(source, folder)
+    env = dict(os.environ, PYTHONPATH=str(HERE) + os.pathsep + os.environ.get('PYTHONPATH', ''))
+    env.setdefault('TAG_EXPLORER_HORIZONS', str(tag_path.parent / 'horizons'))
     started = time.time()
-    proc = subprocess.run([sys.executable, filename], cwd=folder, capture_output=True, text=True, timeout=timeout)
+    proc = subprocess.run([sys.executable, filename], cwd=folder, capture_output=True, text=True, timeout=timeout, env=env)
     (folder / 'log.txt').write_text(f'exit {proc.returncode}\n--- stdout\n{proc.stdout}\n--- stderr\n{proc.stderr}\n')
     return proc, time.time() - started
 
@@ -229,13 +262,14 @@ def same_value(a, b):
 
 def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
     """Problems found in the script's output file (an empty list means it is right)."""
-    frame, shape, selection, (rand, geo, edge) = case
+    frame, shape, selection, (rand, geo, flat, edge) = case
     problems = []
     out_path = folder / f'{rootname}_tagsel.fits'
     if not out_path.is_file():
         return [f'{out_path.name} was not written']
     stray = sorted(p.name for p in folder.iterdir()
-                   if p.name not in (out_path.name, tag_path.name, 'log.txt') and not p.name.endswith('.py'))
+                   if p.name not in (out_path.name, 'log.txt') and not p.name.endswith('.py') and not p.is_symlink()
+                   and p.name != 'horizons')
     if stray:
         problems.append(f'stray files left behind: {stray}')
     with fits.open(tag_path) as old, fits.open(out_path) as new:
@@ -250,35 +284,43 @@ def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
         got = list(new[1].columns.names)
         if got != want:
             problems.append(f'columns {got}, expected {want}')
-        for name in old_names:
+        for name in old_names:   # includes AXIS1 / AXIS2: still the recorded integers
             if name in got and not same(np.asarray(new[1].data[name]), np.asarray(old[1].data[name])):
                 problems.append(f'column {name} changed')
         for name, ref in expected.items():
             if name in got:
-                flag = np.asarray(new[1].data[name]).astype(bool)
-                if not same(flag, ref):
-                    differing = int(np.count_nonzero(flag != ref)) if flag.shape == ref.shape else -1
-                    problems.append(f'{name}: {differing} of {len(ref):,} events differ from the Explorer '
-                                    f'({int(flag.sum()):,} flagged, Explorer {int(ref.sum()):,})')
+                values = np.asarray(new[1].data[name])
+                if ref.dtype == bool:
+                    values = values.astype(bool)
+                if not same(values, ref):
+                    differing = int(np.count_nonzero(values != ref)) if values.shape == ref.shape else -1
+                    problems.append(f'{name}: {differing} of {len(ref):,} events differ from the Explorer')
         for i in range(2, len(old)):   # other tables (good-time intervals ...) are carried over untouched
             if getattr(old[i].data, 'names', None):
                 for name in old[i].columns.names:
                     if not same(np.asarray(new[i].data[name]), np.asarray(old[i].data[name])):
                         problems.append(f'extension {old[i].name} column {name} changed')
-        header = new[1].header
+        header = new[0].header
         host = te.tool_url().split('://')[-1]
-        history = '\n'.join(str(c) for c in header['HISTORY']) + '\n' + '\n'.join(str(c) for c in new[0].header['HISTORY'])
-        checks = [(header.get('SELVER') == te.SELECTION_SCRIPT_VERSION, f'SELVER {header.get("SELVER")!r}'),
-                  (host in str(header.get('SELURL', '')), f'SELURL {header.get("SELURL")!r}'),
-                  (host in history, 'tool URL missing from HISTORY'),
-                  ('v' + te.SELECTION_SCRIPT_VERSION in history, 'script version missing from HISTORY')]
-        if edge:
+        history = '\n'.join(str(c) for c in new[1].header['HISTORY']) + '\n' + '\n'.join(str(c) for c in header['HISTORY'])
+        # which steps ran: PERFORM only when the step took effect (its columns were written)
+        done = {'RANDCORR': rand, 'GEOCORR': geo, 'FLATCORR': 'FLATW' in expected, 'VIGNCORR': 'VIGW' in expected,
+                'EXPTCORR': 'EDGE_OK' in expected}
+        checks = [(header.get(key) == ('PERFORM' if on else 'OMIT'), f'{key} {header.get(key)!r}') for key, on in done.items()]
+        checks += [(header.get('TIMESEL') is (selection in ('time', 'both')), f'TIMESEL {header.get("TIMESEL")!r}'),
+                   (header.get('SPCSEL') is (region is not None), f'SPCSEL {header.get("SPCSEL")!r}'),
+                   (('SEL_TIME' in expected) == (selection in ('time', 'both')), 'SEL_TIME column presence'),
+                   (('SEL_REGION' in expected) == (region is not None), 'SEL_REGION column presence'),
+                   (header.get('SELVER') == te.SELECTION_SCRIPT_VERSION, f'SELVER {header.get("SELVER")!r}'),
+                   (header.get('TTEVER') == te.__version__, f'TTEVER {header.get("TTEVER")!r}'),
+                   (host in str(header.get('SELURL', '')), f'SELURL {header.get("SELURL")!r}'),
+                   (host in history, 'tool URL missing from HISTORY'),
+                   ('v' + te.SELECTION_SCRIPT_VERSION in history, 'script version missing from HISTORY')]
+        if done['EXPTCORR']:
             checks += [(header.get(key) == pixels, f'{key} {header.get(key)!r}, expected {pixels}')
                        for key, pixels in zip(('SELEDGEL', 'SELEDGER', 'SELEDGEB', 'SELEDGET'), te.EDGE_TRIM)]
-        if region is not None and frame in PIXEL_FRAMES:
-            checks += [(header.get('SELFRAME') == frame, f'SELFRAME {header.get("SELFRAME")!r}'),
-                       (header.get('SELRAND') == rand, f'SELRAND {header.get("SELRAND")!r}'),
-                       (header.get('SELGEO') == geo, f'SELGEO {header.get("SELGEO")!r}')]
+        if region is not None:
+            checks.append((header.get('SELFRAME') == frame, f'SELFRAME {header.get("SELFRAME")!r}'))
         for ok, text in checks:
             if not ok:
                 problems.append('header: ' + text)
@@ -292,6 +334,15 @@ def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
                 lost.append(key)
             elif not same_value(new[1].header[key], old[1].header[key]):
                 changed.append(key)
+        # ... and the primary header keeps its keywords too, except the five step flags the script sets itself
+        steps = ('RANDCORR', 'GEOCORR', 'FLATCORR', 'VIGNCORR', 'EXPTCORR')
+        for key in dict.fromkeys(old[0].header):
+            if key in steps or key in ('COMMENT', 'HISTORY', ''):
+                continue
+            if key not in new[0].header:
+                lost.append('primary ' + key)
+            elif not same_value(new[0].header[key], old[0].header[key]):
+                changed.append('primary ' + key)
         if lost:
             problems.append(f'header keywords lost: {", ".join(lost)}')
         if changed:
@@ -308,16 +359,16 @@ def parse_args(argv=None):
     p.add_argument('--spt-file', help='this exposure\'s SPT file, needed for the rest frames')
     p.add_argument('--work', default='selection_test', help='working folder (default: ./selection_test)')
     p.add_argument('--switches', choices=sorted(SWITCH_SETS), default='quick',
-                   help='quick: corrections all on or all off. all: every combination of jitter, geometric and edge trim')
+                   help='quick: corrections all on or all off. all: every combination of jitter, geometric, flat and edge trim')
     p.add_argument('--frames', default=','.join(PIXEL_FRAMES), help='comma-separated (default: image,rest,rest_north)')
-    p.add_argument('--planet-frames', action='store_true', help='also try planet frames and maps (needs Horizons)')
+    p.add_argument('--planet-frames', action='store_true', help='also try the planet frames (needs Horizons, and a moon observation)')
     p.add_argument('--shapes', default=','.join(SHAPES))
     p.add_argument('--selections', default=','.join(SELECTIONS))
     p.add_argument('--limit', type=int, help='run only this many cases, picked at random')
     p.add_argument('--seed', type=int, default=1)
     p.add_argument('--jobs', type=int, default=2, help='scripts running at once (each reads the whole file)')
     p.add_argument('--timeout', type=int, default=3600, help='seconds allowed for one script')
-    p.add_argument('--skip-download-test', action='store_true', help='fetch the TAG file from AWS S3 (or MAST) here instead of testing the script\'s own download')
+    p.add_argument('--skip-download-test', action='store_true', help='fetch the TAG and SPT files from AWS S3 (or MAST) here instead of testing the script\'s own downloads')
     p.add_argument('--keep', action='store_true', help='keep every run folder, not only the failures')
     p.add_argument('--list', action='store_true', help='list the cases and stop')
     return p.parse_args(argv)
@@ -348,11 +399,14 @@ def main(argv=None):
     from timetag_explorer import constants, dataset as tte_dataset
     from astropy.io import fits
 
+    from timetag_explorer import tagsel, transforms
     te = types.SimpleNamespace(
         Box=tte.Box, Circle=tte.Circle, Polygon=tte.Polygon, Corrections=tte.Corrections, FrameInfo=tte.FrameInfo,
-        TagDataset=tte.TagDataset, build_selection_script=tte.build_selection_script,
+        TagDataset=tte.TagDataset, build_selection_script=tte.build_selection_script, __version__=tte.__version__,
         SELECTION_SCRIPT_VERSION=tte.SELECTION_SCRIPT_VERSION, TIME_DECIMALS=constants.TIME_DECIMALS,
-        EDGE_TRIM=constants.EDGE_TRIM, tool_url=tte.selection_script.tool_url,
+        EDGE_TRIM=constants.EDGE_TRIM, tool_url=tte.selection_script.tool_url, RANDOM_SEED=constants.RANDOM_SEED,
+        POSITION_COLUMNS=tagsel.POSITION_COLUMNS, frame_coordinates=transforms.frame_coordinates,
+        load_geo_lut=transforms.load_geo_lut,
         _is_sorted=tte_dataset._is_sorted, _load_dataset_uncached=tte_dataset._load_dataset_uncached)
 
     if args.tag_file:
@@ -367,16 +421,19 @@ def main(argv=None):
         rootname = args.rootname.lower()
         tag_path = data / f'{rootname}_tag.fits'
 
-    # 1. The download test: a script run in the empty data folder fetches the TAG file from MAST itself.
+    # 1. The download test: a script run in the empty data folder fetches the TAG file, the SPT file and the flat
+    #    field itself.
     results = []
+    flat_path = data / 'combined_flat.fits'
     if not args.tag_file and not tag_path.exists() and not args.skip_download_test:
-        print(f'download test: running a script in the empty folder {data} (one request to MAST) ...')
+        print(f'download test: running a script in the empty folder {data} (requests to MAST and the flat-field site) ...')
         stub = te.TagDataset(name=tag_path.name, time=np.array([0.0, 1.0], np.float32), x=np.array([1, 2], np.int16),
                              y=np.array([1, 2], np.int16), gti=np.array([[0.0, 1.0]]), rootname=rootname,
-                             frame_info=te.FrameInfo(orientat=0.0, slew_angle=0.0, slew_rate=0.0))
+                             frame_info=te.FrameInfo(orientat=0.0, slew_angle=0.0, slew_rate=0.0), weight=np.ones(2, np.float32))
         s = te.build_selection_script(stub, (0.0, 1.0), None, 'image', te.Corrections(randcorr=False, geocorr=False))
         proc, secs = run_script(s.code, s.filename, tag_path, data, args.timeout)   # (the link is skipped: no file yet)
-        ok = proc.returncode == 0 and tag_path.is_file() and not tag_path.is_symlink()
+        ok = (proc.returncode == 0 and tag_path.is_file() and not tag_path.is_symlink()
+              and (data / f'{rootname}_spt.fits').is_file() and flat_path.is_file())
         results.append(('download test', 'PASS' if ok else 'FAIL', secs, '' if ok else (proc.stderr or proc.stdout)[-600:]))
         print(f'  {results[-1][1]} ({secs:.0f} s)')
         if not ok:
@@ -384,28 +441,38 @@ def main(argv=None):
             return 1
         out = data / f'{rootname}_tagsel.fits'
         out.unlink(missing_ok=True)
-    # 2. The package's own copy of the data (the SPT file comes from S3, or MAST).
+    # 2. The data every run shares (the SPT file comes from S3, or MAST; the flat field from its site).
     if not tag_path.exists():
         print('fetching the data ...')
         ensure_files(rootname, data)
     elif not args.tag_file:
         ensure_files(rootname, data)   # only fetches what is missing: the SPT file
+    if not flat_path.exists():
+        print('fetching the flat field ...')
+        tagsel.download_flat(flat_path)
+    os.environ['TAG_EXPLORER_FLAT'] = str(flat_path)
+    os.environ['TAG_EXPLORER_HORIZONS'] = str(data / 'horizons')
+    tte.config.FLAT_FILE, tte.config.HORIZONS_DIR = flat_path, data / 'horizons'
+    spt_path = tag_path.with_name(f'{rootname}_spt.fits')
+    shared = [p for p in (spt_path, flat_path) if p.is_file()]
     print(f'loading {tag_path.name} ...')
     ds = te._load_dataset_uncached(str(tag_path))
     if ds.frame_info.problem:
         print(f'note: rest frames unavailable ({ds.frame_info.problem})')
+    if ds.weight is None:
+        print(f'note: no flat-field weights ({ds.flat_problem})')
     raw_time = np.asarray(fits.getdata(tag_path, ext=1)['TIME'], dtype=np.float32)
     order = None if te._is_sorted(raw_time) else np.argsort(raw_time, kind='stable')
     del raw_time
     print(f'{len(ds.time):,} events, '
-          f'{"in time order" if order is None else "NOT in time order: flags are mapped back to file order"}')
+          f'{"in time order" if order is None else "NOT in time order: columns are mapped back to file order"}')
     maker = RegionMaker(te, ds)
     print(f'time window {maker.time_sel[0]} to {maker.time_sel[1]} s')
 
     # 3. Build every script, then run them.
     available, jobs, skipped = {}, [], []
     for case in cases:
-        frame, shape, selection, (rand, geo, edge) = case
+        frame, shape, selection, (rand, geo, flat, edge) = case
         if frame not in available:
             try:
                 ds.prepare_frame(frame)
@@ -415,8 +482,8 @@ def main(argv=None):
         if available[frame]:
             skipped.append((case, available[frame]))
             continue
-        corr = te.Corrections(randcorr=rand, geocorr=geo, timecorr=edge)
-        region = None if selection == 'time' else maker.region(shape, frame, corr)
+        corr = te.Corrections(randcorr=rand, geocorr=geo, flatcorr=flat, timecorr=edge)
+        region = None if selection in ('time', 'none') else maker.region(shape, frame, corr)
         time_sel = maker.time_sel if selection in ('time', 'both') else None
         try:
             s = te.build_selection_script(ds, time_sel, region, frame, corr)
@@ -434,7 +501,7 @@ def main(argv=None):
     def run_one(job):
         case, region, time_sel, s = job
         folder = runs / case_name(case).replace('/', '_')
-        return job, folder, *run_script(s.code, s.filename, tag_path, folder, args.timeout)
+        return job, folder, *run_script(s.code, s.filename, tag_path, folder, args.timeout, shared)
 
     with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
         for future in as_completed([pool.submit(run_one, j) for j in jobs]):
@@ -447,7 +514,7 @@ def main(argv=None):
             if proc.returncode != 0:
                 problems = ['script exited with an error: ' + (proc.stderr.strip().splitlines() or ['?'])[-1]]
             else:
-                expected = reference_flags(te, ds, order, case, time_sel, region)
+                expected = reference_columns(te, ds, order, case, time_sel, region)
                 try:
                     problems = check_output(te, fits, case, region, expected, tag_path, folder, rootname)
                 except Exception as exc:
@@ -456,6 +523,14 @@ def main(argv=None):
                     n = int(expected['SEL_REGION'].sum())
                     if n == 0 or n == len(ds.time):   # a region with nothing, or everything, in it proves little
                         problems.append(f'weak test: the region holds {n:,} events')
+                    else:   # the Explorer's binned highlight differs from the exact test only near the region's edge
+                        corr = te.Corrections(randcorr=case[3][0], geocorr=case[3][1], flatcorr=case[3][2],
+                                              timecorr=case[3][3])
+                        binned = to_file_order(ds.region_mask(region, case[0], corr), order)
+                        apart = int(np.count_nonzero(binned != expected['SEL_REGION']))
+                        if apart > 0.10 * max(n, 1):
+                            problems.append(f'the exact region test and the Explorer\'s binned one differ for {apart:,} '
+                                            f'of {n:,} selected events: more than an edge effect')
             status = 'PASS' if not problems else 'FAIL'
             results.append((name, status, secs, '; '.join(problems)))
             print(f'  {status}  {name:<42} {secs:6.1f} s  {"; ".join(problems)[:300]}')

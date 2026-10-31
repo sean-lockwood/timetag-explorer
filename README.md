@@ -50,8 +50,10 @@ TIME-TAG file; the planet ones also ask JPL Horizons for positions (through `ast
 [how it was made](https://www.planetarylightshow.com/aurora_processing.html#Flat-Fielding)) where `config.FLAT_FILE` points,
 or set the environment variables `TAG_EXPLORER_FLAT` and `TAG_EXPLORER_HORIZONS`.
 
-`build_selection_script(ds, time_sel, region, frame, corr)` returns a standalone Python script that reproduces a
-selection on the original TIME-TAG file and writes flag columns into a copy of it.
+`build_selection_script(ds, time_sel, region, frame, corr)` returns a short Python script that reproduces a selection
+on the original TIME-TAG file and writes a copy of it (`<rootname>_tagsel.fits`) with columns added: selection flags,
+the corrected positions (`XCORR`, `YCORR`) and positions in each reference frame, and the weights. The script calls
+`timetag_explorer.tagsel.make_tagsel` and names the exact package version to install (see `CHANGELOG.md`).
 
 ## What is where
 
@@ -65,6 +67,7 @@ selection on the original TIME-TAG file and writes flag columns into a copy of i
 | `dataset` | `TagDataset`: events, slicing in time, binning, light curves, count-rate images |
 | `analysis` | areas, mean brightness and the exposure for a selection |
 | `selection_script` | the generator of selection scripts (and its version, `SELVER`) |
+| `tagsel` | what a selection script runs: the flags, corrected positions and weights it writes into `_tagsel.fits` |
 | `gdcorr` | the geometric distortion polynomial (placeholder coefficients for now) |
 | `vignette` | the experimental vignetting model (two sensitivity ramps; F25SRF2 only; off by default) |
 | `constants`, `config`, `log` | shared numbers; file locations; logging |

@@ -57,6 +57,8 @@ Selection scripts
 
 .. automodule:: timetag_explorer.selection_script
 
+.. automodule:: timetag_explorer.tagsel
+
 Configuration, constants and logging
 ------------------------------------
 

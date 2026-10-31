@@ -13,6 +13,39 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
+## [1.4.0] - Unreleased
+
+**Selection scripts are rebuilt on the package** (`SELECTION_SCRIPT_VERSION` 2.0). No number the Explorer shows changes;
+the script and the file it writes do.
+
+* The generated script is now short: the user's choices (time window, region, frame, corrections) and a call to the new
+  `timetag_explorer.tagsel.make_tagsel`, which does the work with the package's own code instead of a re-implementation
+  of the arithmetic. It names the exact `timetag-explorer` version the Explorer ran, gives the `pip install` line for
+  it (a PyPI release, or the git commit or archive address of a branch the Explorer is testing; read from pip's
+  `direct_url.json`), and stops if another version is installed unless `ALLOW_OTHER_VERSION = True`.
+* **The region is tested at each event's own position**, not on the Explorer's 4-pixel bins. Events within about two
+  pixels of a region's edge can differ from the highlighted bins. (Regions drawn on planet maps, which are experimental,
+  are not carried over; the script says so.)
+* The output (`<rootname>_tagsel.fits`) keeps every original column, `AXIS1` and `AXIS2` included, unchanged, and adds:
+  `XCORR`, `YCORR` (the image-frame position with the random sub-pixel offset and/or the geometric distortion
+  correction applied, when either is on); a pair per reference frame from those positions (`XREST`/`YREST`,
+  `XRESTN`/`YRESTN`, and for moon observations `XPLAN`/`YPLAN`, `XPLANN`/`YPLANN`), counted from 1 like AXIS1/AXIS2;
+  the weights `FLATW`, `VIGW` (vignetting model) and `WEIGHT` (their product); and the flags `SEL_TIME`, `SEL_REGION`,
+  `EDGE_OK` as before.
+* **Primary-header keywords** (ext 0) record what was done: `RANDCORR`, `GEOCORR`, `FLATCORR`, `VIGNCORR`, `EXPTCORR`
+  (`PERFORM` or `OMIT`; `PERFORM` only when the step took effect: the flat field was found, the vignetting model applies to
+  the aperture), `TIMESEL` and `SPCSEL` (True when a time range / a region was selected), `SELTMIN`/`SELTMAX`,
+  `SELREG`/`SELFRAME`, `RANDSEED`, the vignetting ramps (`VIGBSTRT` ... `VIGTLOSS`), the edge trim (`SELEDGEL` ...),
+  and `SELVER` and the new `TTEVER` (package version) and `SELURL`. These replace the extension-1 keywords of the 1.x
+  scripts (`SELRAND`, `SELGEO` and the others). Where the calibration pipeline had already put one of the five step
+  keywords in the file, its original value is kept in the HISTORY.
+* **A selection is optional**: with no time range and no region the script still applies the corrections and writes the
+  positions and weights (`TIMESEL` and `SPCSEL` are False and there are no `SEL_TIME` / `SEL_REGION` columns).
+* The script downloads the SPT file (for the rest frames) and the flat field as well as the TAG file.
+* New `TagDataset.vignette_gain()`. The self-contained generator, with its own copy of the geometric distortion
+  polynomial, is gone; scripts written by version 1.x keep working as they are.
+* `validation/check_selection_scripts.py` now checks the positions and weights as well as the flags.
+
 ## [1.3.0] - Unreleased
 
 **New, experimental, off by default: a vignetting model for the F25SRF2 aperture.** No result changes unless it is switched on
