@@ -233,6 +233,48 @@ def column_definition(name: str, values: np.ndarray):
                        unit='pixel' if name[0] in 'XY' else None)
 
 
+STEP_KEYWORDS = ('RANDCORR', 'GEOCORR', 'FLATCORR', 'VIGNCORR', 'EXPTCORR')
+
+
+def primary_keywords(ds: TagDataset, time_sel: TimeSel | None, region: Region | None, frame: str, corr: Corrections,
+                     columns: TagselColumns, script_version: str, tool_url: str) -> list:
+    """(keyword, value, comment) for the primary header: which steps were performed, which selections were made, and
+    the versions and numbers behind them. A step is PERFORM only when it took effect (the flat field must have been
+    found, the vignetting model must apply to this aperture); otherwise OMIT. Needs no FITS library."""
+    from . import __version__
+    done = {'RANDCORR': bool(corr.randcorr), 'GEOCORR': bool(corr.geocorr), 'FLATCORR': 'FLATW' in columns.arrays,
+            'VIGNCORR': 'VIGW' in columns.arrays, 'EXPTCORR': 'EDGE_OK' in columns.arrays}
+    what = {'RANDCORR': 'random sub-pixel offset (XCORR, YCORR and the frame columns)',
+            'GEOCORR': 'geometric distortion correction (XCORR, YCORR and the frame columns)',
+            'FLATCORR': 'flat-field weights (FLATW)', 'VIGNCORR': 'vignetting model, F25SRF2 only (VIGW)',
+            'EXPTCORR': 'detector-edge trim flag (EDGE_OK)'}
+    keys = [(key, 'PERFORM' if done[key] else 'OMIT', f'{what[key]}: performed or omitted') for key in STEP_KEYWORDS]
+    keys += [('TIMESEL', time_sel is not None, 'a time selection was made (SEL_TIME)'),
+             ('SPCSEL', region is not None, 'a region was selected (SEL_REGION)')]
+    if time_sel is not None:
+        keys += [('SELTMIN', float(time_sel[0]), '[s] SEL_TIME window start'),
+                 ('SELTMAX', float(time_sel[1]), '[s] SEL_TIME window end')]
+    if region is not None:
+        keys += [('SELREG', region.kind, 'SEL_REGION shape'), ('SELFRAME', frame, 'SEL_REGION reference frame')]
+    if done['RANDCORR']:
+        keys.append(('RANDSEED', RANDOM_SEED, 'seed of the random sub-pixel offsets'))
+    if done['VIGNCORR']:
+        keys += [('VIGBSTRT', float(corr.vigbot_start), '[pix] bottom ramp starts at this row (0-indexed)'),
+                 ('VIGBEND', float(corr.vigbot_end), '[pix] bottom ramp: row where the loss is reached'),
+                 ('VIGBLOSS', float(corr.vigbot_loss), 'bottom ramp: fractional loss at that row'),
+                 ('VIGTSTRT', float(corr.vigtop_start), '[pix] top ramp starts at this row (0-indexed)'),
+                 ('VIGTEND', float(corr.vigtop_end), '[pix] top ramp: row where the loss is reached'),
+                 ('VIGTLOSS', float(corr.vigtop_loss), 'top ramp: fractional loss at that row')]
+    if done['EXPTCORR']:
+        keys += [(key, pixels, f'[pix] EDGE_OK trim of the {side} edge') for key, side, pixels in (
+            ('SELEDGEL', 'left', EDGE_TRIM.left), ('SELEDGER', 'right', EDGE_TRIM.right),
+            ('SELEDGEB', 'bottom', EDGE_TRIM.bottom), ('SELEDGET', 'top', EDGE_TRIM.top))]
+    keys += [('SELVER', script_version, 'TIME-TAG Explorer selection script version'),
+             ('TTEVER', __version__, 'timetag-explorer package version'),
+             ('SELURL', tool_url, 'tool URL')]
+    return keys
+
+
 def make_tagsel(rootname: str, *, time_sel: TimeSel | None = None, region: Region | None = None,
                 frame: str = 'image', corr: Corrections, script_version: str, tool_url: str,
                 folder='.', overwrite: bool = False, log=print) -> Path:
@@ -278,13 +320,7 @@ def make_tagsel(rootname: str, *, time_sel: TimeSel | None = None, region: Regio
                'scaled ones (TIME) are stored as plain floating point']
     history += columns.history
     history.append('Positions are hi-res pixels counted from 1, like AXIS1 and AXIS2; float32')
-    history.append(f'Random sub-pixel offset {"on, seed " + str(RANDOM_SEED) if corr.randcorr else "off"}; '
-                   f'geometric distortion {"on" if corr.geocorr else "off"}; flat field {"on" if corr.flatcorr else "off"}; '
-                   f'vignetting model {"on" if ds.vignette_applies() and corr.vigcorr else "off"}; '
-                   f'exposure-time/edge trim {"on" if corr.timecorr else "off"}')
-    if ds.vignette_applies() and corr.vigcorr:
-        history.append('Vignetting ramps (start row, end row, loss): bottom %g, %g, %g; top %g, %g, %g' % (
-            corr.vigbot_start, corr.vigbot_end, corr.vigbot_loss, corr.vigtop_start, corr.vigtop_end, corr.vigtop_loss))
+    history.append('Which steps were performed, the selections made and the versions are keywords of the primary header')
 
     with fits.open(tag_path) as hdul:
         raw_time = np.asarray(hdul[1].data['TIME'], dtype=np.float32)
@@ -297,27 +333,21 @@ def make_tagsel(rootname: str, *, time_sel: TimeSel | None = None, region: Regio
             del header[key]   # the old column definitions, TSCAL and TZERO included
         table = fits.BinTableHDU.from_columns(fits.ColDefs(table_columns), header=header)
         header = table.header
-        header['SELVER'] = (script_version, 'TIME-TAG Explorer selection script version')
-        header['TTEVER'] = (__version__, 'timetag-explorer package version')
-        header['SELURL'] = (tool_url, 'tool URL')
-        if time_sel is not None:
-            header['SELTMIN'] = (float(time_sel[0]), '[s] SEL_TIME window start')
-            header['SELTMAX'] = (float(time_sel[1]), '[s] SEL_TIME window end')
-        if region is not None:
-            header['SELREG'] = (region.kind, 'SEL_REGION shape')
-            header['SELFRAME'] = (frame, 'SEL_REGION reference frame')
-        header['SELRAND'] = (bool(corr.randcorr), 'random sub-pixel offset applied')
-        header['SELGEO'] = (bool(corr.geocorr), 'geometric distortion applied')
-        header['SELFLAT'] = ('FLATW' in columns.arrays, 'flat-field weights written')
-        header['SELVIG'] = ('VIGW' in columns.arrays, 'vignetting-model weights written')
-        if 'EDGE_OK' in columns.arrays:
-            for key, side, pixels in (('SELEDGEL', 'left', EDGE_TRIM.left), ('SELEDGER', 'right', EDGE_TRIM.right),
-                                      ('SELEDGEB', 'bottom', EDGE_TRIM.bottom), ('SELEDGET', 'top', EDGE_TRIM.top)):
-                header[key] = (pixels, f'[pix] EDGE_OK trim of the {side} edge')
         for text in history:
             for line in textwrap.wrap(text, 68):
                 header.add_history(line)
-        hdul[0].header.add_history('Columns added to extension 1; see its header (SELVER, HISTORY).')
+        primary = hdul[0].header
+        replaced = []
+        for key, value, comment in primary_keywords(ds, time_sel, region, frame, corr, columns, script_version, tool_url):
+            if key in STEP_KEYWORDS and key in primary and primary[key] != value:
+                replaced.append(f'{key} was {primary[key]!r}')
+            primary[key] = (value, comment)
+        primary.add_history('Columns added to extension 1; see its HISTORY. The processing steps and selections are '
+                            'the keywords here (RANDCORR ... EXPTCORR, TIMESEL, SPCSEL, SELVER, TTEVER).')
+        if replaced:   # the calibration pipeline's own flags of these names now say what this script did instead
+            for line in textwrap.wrap('Values these step keywords had in the original file (the calibration '
+                                      'pipeline\'s): ' + '; '.join(replaced), 68):
+                primary.add_history(line)
         hdul[1] = table
         part = output.with_name(output.name + '.part')   # written aside, so a failure never leaves a broken output
         try:

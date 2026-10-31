@@ -163,6 +163,14 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
                      'the other columns, which cover every event.')
     notes.append('TIME is stored in the TAG file as a scaled integer; the output holds the same values as plain 64-bit '
                  'floating point, so it is a little larger. Other original columns are unchanged.')
+    if time_sel is None and region is None:
+        notes.append('No time range or region was selected, so the file has no `SEL_TIME` / `SEL_REGION` columns '
+                     '(`TIMESEL` and `SPCSEL` are False): the corrections, positions and weights are still written.')
+    notes.append('The primary header says which steps ran: `RANDCORR`, `GEOCORR`, `FLATCORR`, `VIGNCORR`, `EXPTCORR` '
+                 '(`PERFORM` or `OMIT`; a step is `OMIT` when it was off or could not take effect, such as the '
+                 'vignetting model for an aperture other than F25SRF2). Where the calibration pipeline had already put a '
+                 'keyword of that name, its original value is noted in the HISTORY. `TIMESEL` and `SPCSEL` are True '
+                 'when a time range or a region was selected.')
     notes.append(f'Script version {version}. It is written into the output file’s header (with the package version), so '
                  'keep the numbers if you report results.')
 
@@ -179,6 +187,8 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
     add(f'Script version {version}, written {datetime.now(timezone.utc):%Y-%m-%d} (UTC), for timetag-explorer {__version__}.')
     add('')
     add('Selections in the Explorer')
+    if time_sel is None and region is None:
+        add('  none (the corrections are still applied; the file gets no selection columns)')
     if time_sel is not None:
         add(f'  time         {t_text}')
     if region is not None:
@@ -191,9 +201,11 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
     add('')
     add('What it does')
     add(f'  1. Downloads {root}_tag.fits and {root}_spt.fits (MAST) and the flat field, unless they are here.')
-    add('  2. Flags the selected events (True = selected) and adds the corrected positions and weights.')
-    add(f'  3. Writes {output}: the TAG file with those columns added, and header keywords and')
-    add('     HISTORY that record the script and package versions and the corrections that ran.')
+    add('  2. Flags the selected events (True = selected, if any selection was made) and adds the corrected')
+    add('     positions and weights.')
+    add(f'  3. Writes {output}: the TAG file with those columns added. The primary header records')
+    add('     which steps were performed (RANDCORR, GEOCORR, FLATCORR, VIGNCORR, EXPTCORR), whether a time or')
+    add('     space selection was made (TIMESEL, SPCSEL), and the script and package versions.')
     add('"""')
     add('import timetag_explorer')
     add('from timetag_explorer.frames import Corrections')

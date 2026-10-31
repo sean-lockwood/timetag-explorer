@@ -48,7 +48,7 @@ HST_S3_BUCKET, HST_S3_PREFIX = 'stpubdata', 'hst/public'    # the public HST arc
 PIXEL_FRAMES = ('image', 'rest', 'rest_north')
 PLANET_FRAMES = ('planet', 'planet_north')
 SHAPES = ('box', 'circle', 'polygon')
-SELECTIONS = ('time', 'space', 'both')
+SELECTIONS = ('time', 'space', 'both', 'none')
 # (randcorr, geocorr, flatcorr, timecorr): "quick" is everything on and everything off, "all" is every combination
 SWITCH_SETS = {
     'quick': [(True, True, True, True), (False, False, False, False)],
@@ -105,12 +105,14 @@ def ensure_files(rootname, folder):
 def make_cases(frames, shapes, selections, switches):
     """(frame, shape, selection, (rand, geo, flat, edge)) for every distinct script.
 
-    A time-only script does not depend on the frame or the shape, so it is listed once, as 'image'."""
+    A time-only (or no-selection) script does not depend on the frame or the shape, so it is listed once, as 'image'."""
     cases = []
     for sw in switches:
         if 'time' in selections:
             cases.append(('image', None, 'time', sw))
-        for frame, shape, selection in itertools.product(frames, shapes, [s for s in selections if s != 'time']):
+        if 'none' in selections:       # no selection: the corrections alone
+            cases.append(('image', None, 'none', sw))
+        for frame, shape, selection in itertools.product(frames, shapes, [s for s in selections if s not in ('time', 'none')]):
             cases.append((frame, shape, selection, sw))
     return cases
 
@@ -298,17 +300,23 @@ def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
                 for name in old[i].columns.names:
                     if not same(np.asarray(new[i].data[name]), np.asarray(old[i].data[name])):
                         problems.append(f'extension {old[i].name} column {name} changed')
-        header = new[1].header
+        header = new[0].header
         host = te.tool_url().split('://')[-1]
-        history = '\n'.join(str(c) for c in header['HISTORY']) + '\n' + '\n'.join(str(c) for c in new[0].header['HISTORY'])
-        checks = [(header.get('SELVER') == te.SELECTION_SCRIPT_VERSION, f'SELVER {header.get("SELVER")!r}'),
-                  (header.get('TTEVER') == te.__version__, f'TTEVER {header.get("TTEVER")!r}'),
-                  (host in str(header.get('SELURL', '')), f'SELURL {header.get("SELURL")!r}'),
-                  (host in history, 'tool URL missing from HISTORY'),
-                  ('v' + te.SELECTION_SCRIPT_VERSION in history, 'script version missing from HISTORY'),
-                  (header.get('SELRAND') == rand, f'SELRAND {header.get("SELRAND")!r}'),
-                  (header.get('SELGEO') == geo, f'SELGEO {header.get("SELGEO")!r}')]
-        if edge:
+        history = '\n'.join(str(c) for c in new[1].header['HISTORY']) + '\n' + '\n'.join(str(c) for c in header['HISTORY'])
+        # which steps ran: PERFORM only when the step took effect (its columns were written)
+        done = {'RANDCORR': rand, 'GEOCORR': geo, 'FLATCORR': 'FLATW' in expected, 'VIGNCORR': 'VIGW' in expected,
+                'EXPTCORR': 'EDGE_OK' in expected}
+        checks = [(header.get(key) == ('PERFORM' if on else 'OMIT'), f'{key} {header.get(key)!r}') for key, on in done.items()]
+        checks += [(header.get('TIMESEL') is (selection in ('time', 'both')), f'TIMESEL {header.get("TIMESEL")!r}'),
+                   (header.get('SPCSEL') is (region is not None), f'SPCSEL {header.get("SPCSEL")!r}'),
+                   (('SEL_TIME' in expected) == (selection in ('time', 'both')), 'SEL_TIME column presence'),
+                   (('SEL_REGION' in expected) == (region is not None), 'SEL_REGION column presence'),
+                   (header.get('SELVER') == te.SELECTION_SCRIPT_VERSION, f'SELVER {header.get("SELVER")!r}'),
+                   (header.get('TTEVER') == te.__version__, f'TTEVER {header.get("TTEVER")!r}'),
+                   (host in str(header.get('SELURL', '')), f'SELURL {header.get("SELURL")!r}'),
+                   (host in history, 'tool URL missing from HISTORY'),
+                   ('v' + te.SELECTION_SCRIPT_VERSION in history, 'script version missing from HISTORY')]
+        if done['EXPTCORR']:
             checks += [(header.get(key) == pixels, f'{key} {header.get(key)!r}, expected {pixels}')
                        for key, pixels in zip(('SELEDGEL', 'SELEDGER', 'SELEDGEB', 'SELEDGET'), te.EDGE_TRIM)]
         if region is not None:
@@ -326,6 +334,15 @@ def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
                 lost.append(key)
             elif not same_value(new[1].header[key], old[1].header[key]):
                 changed.append(key)
+        # ... and the primary header keeps its keywords too, except the five step flags the script sets itself
+        steps = ('RANDCORR', 'GEOCORR', 'FLATCORR', 'VIGNCORR', 'EXPTCORR')
+        for key in dict.fromkeys(old[0].header):
+            if key in steps or key in ('COMMENT', 'HISTORY', ''):
+                continue
+            if key not in new[0].header:
+                lost.append('primary ' + key)
+            elif not same_value(new[0].header[key], old[0].header[key]):
+                changed.append('primary ' + key)
         if lost:
             problems.append(f'header keywords lost: {", ".join(lost)}')
         if changed:
@@ -466,7 +483,7 @@ def main(argv=None):
             skipped.append((case, available[frame]))
             continue
         corr = te.Corrections(randcorr=rand, geocorr=geo, flatcorr=flat, timecorr=edge)
-        region = None if selection == 'time' else maker.region(shape, frame, corr)
+        region = None if selection in ('time', 'none') else maker.region(shape, frame, corr)
         time_sel = maker.time_sel if selection in ('time', 'both') else None
         try:
             s = te.build_selection_script(ds, time_sel, region, frame, corr)

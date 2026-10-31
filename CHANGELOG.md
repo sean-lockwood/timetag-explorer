@@ -31,8 +31,16 @@ the script and the file it writes do.
   correction applied, when either is on); a pair per reference frame from those positions (`XREST`/`YREST`,
   `XRESTN`/`YRESTN`, and for moon observations `XPLAN`/`YPLAN`, `XPLANN`/`YPLANN`), counted from 1 like AXIS1/AXIS2;
   the weights `FLATW`, `VIGW` (vignetting model) and `WEIGHT` (their product); and the flags `SEL_TIME`, `SEL_REGION`,
-  `EDGE_OK` as before. New header keywords `TTEVER` (package version), `SELFLAT`, `SELVIG`; `SELRAND` and `SELGEO` are
-  now always written.
+  `EDGE_OK` as before.
+* **Primary-header keywords** (ext 0) record what was done: `RANDCORR`, `GEOCORR`, `FLATCORR`, `VIGNCORR`, `EXPTCORR`
+  (`PERFORM` or `OMIT`; `PERFORM` only when the step took effect: the flat field was found, the vignetting model applies to
+  the aperture), `TIMESEL` and `SPCSEL` (True when a time range / a region was selected), `SELTMIN`/`SELTMAX`,
+  `SELREG`/`SELFRAME`, `RANDSEED`, the vignetting ramps (`VIGBSTRT` ... `VIGTLOSS`), the edge trim (`SELEDGEL` ...),
+  and `SELVER` and the new `TTEVER` (package version) and `SELURL`. These replace the extension-1 keywords of the 1.x
+  scripts (`SELRAND`, `SELGEO` and the others). Where the calibration pipeline had already put one of the five step
+  keywords in the file, its original value is kept in the HISTORY.
+* **A selection is optional**: with no time range and no region the script still applies the corrections and writes the
+  positions and weights (`TIMESEL` and `SPCSEL` are False and there are no `SEL_TIME` / `SEL_REGION` columns).
 * The script downloads the SPT file (for the rest frames) and the flat field as well as the TAG file.
 * New `TagDataset.vignette_gain()`. The self-contained generator, with its own copy of the geometric distortion
   polynomial, is gone; scripts written by version 1.x keep working as they are.

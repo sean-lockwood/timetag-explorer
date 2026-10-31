@@ -190,6 +190,44 @@ noflat = dataset(t, xs, ys); noflat.flat_problem = 'Flat field not found'
 cols = tagsel.selection_columns(noflat, None, None, 'image', on)
 assert 'FLATW' not in cols.arrays and 'WEIGHT' not in cols.arrays and ('flat field', 'Flat field not found') in cols.skipped
 
+# ---- no selection: the corrections still apply, and the file has no selection columns --------------------------------
+s = tte.build_selection_script(ds, None, None, 'image', corr_all)
+assert not s.warnings and 'none (the corrections are still applied' in s.code and 'TIME_WINDOW = None' in s.code
+calls.clear(); run_script(s.code)
+assert calls[0][1]['time_sel'] is None and calls[0][1]['region'] is None and calls[0][1]['corr'].randcorr
+assert "('EDGE_OK',)" in s.code        # the example keeps only the flags that exist
+bare = tagsel.selection_columns(exp, None, None, 'image', on)
+assert list(bare.arrays)[:3] == ['EDGE_OK', 'XCORR', 'YCORR'] and bare.flags == ('EDGE_OK',)
+assert not {'SEL_TIME', 'SEL_REGION'} & set(bare.arrays)
+nothing = tagsel.selection_columns(exp, None, None, 'image', OFF)
+assert 'EDGE_OK' not in nothing.arrays and not nothing.flags and 'XCORR' not in nothing.arrays and 'XREST' in nothing.arrays
+
+# ---- the primary header: which steps ran, which selections were made ---------------------------------------------
+def header(time_sel, region, frame, corr, dsx=exp):
+    cols = tagsel.selection_columns(dsx, time_sel, region, frame, corr)
+    return {k: v for k, v, c in tagsel.primary_keywords(dsx, time_sel, region, frame, corr, cols, '2.0', 'https://x')}
+
+h = header((20.0, 60.0), box, 'image', on)
+assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['PERFORM', 'OMIT', 'PERFORM', 'OMIT', 'PERFORM'], h     # rand, geo, flat, vign, expt
+assert h['TIMESEL'] is True and h['SPCSEL'] is True and (h['SELTMIN'], h['SELTMAX']) == (20.0, 60.0)
+assert h['SELREG'] == 'box' and h['SELFRAME'] == 'image' and h['RANDSEED'] == RANDOM_SEED
+assert (h['SELEDGEL'], h['SELEDGER'], h['SELEDGEB'], h['SELEDGET']) == tuple(EDGE_TRIM)
+assert h['SELVER'] == '2.0' and h['TTEVER'] == tte.__version__ and h['SELURL'] == 'https://x' and 'VIGBSTRT' not in h
+h = header((20.0, 60.0), None, 'image', OFF)
+assert h['TIMESEL'] is True and h['SPCSEL'] is False and 'SELREG' not in h
+assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['OMIT'] * 5 and 'RANDSEED' not in h and 'SELEDGEL' not in h
+h = header(None, None, 'image', replace(OFF, geocorr=True))
+assert h['TIMESEL'] is False and h['SPCSEL'] is False and h['GEOCORR'] == 'PERFORM' and h['RANDCORR'] == 'OMIT'
+# a step is PERFORM only if it took effect: no flat found, or a vignetting model for another aperture
+assert header(None, None, 'image', on, noflat)['FLATCORR'] == 'OMIT'
+other_ap = dataset(t, xs, ys, weight=w); other_ap.aperture = '52X2'
+assert header(None, None, 'image', vig, other_ap)['VIGNCORR'] == 'OMIT'
+sens.aperture = 'F25SRF2'
+h = header(None, None, 'image', vig, sens)
+assert h['VIGNCORR'] == 'PERFORM' and (h['VIGBSTRT'], h['VIGBEND'], h['VIGBLOSS']) == (128.0, 28.0, 0.05)
+assert (h['VIGTSTRT'], h['VIGTEND'], h['VIGTLOSS']) == (1550.0, 2047.0, 0.23)
+assert all(len(k) <= 8 for k in h)                          # FITS keywords
+
 # ---- helpers for the file ------------------------------------------------------------------------------------------
 # flags worked out in time order go back to the file's row order
 order = np.array([2, 0, 1])
