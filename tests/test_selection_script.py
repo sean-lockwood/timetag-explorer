@@ -265,7 +265,7 @@ assert code.count('# keep = np.ones(len(t), dtype=bool)') == 2
 assert code.count("# w *= t['FLATW']") == 2 and code.count("# w *= t['VIGW']") == 2 and 'WEIGHT' not in code
 assert code.count("hdr['SELTMIN']") == 2 and code.count('UnitsWarning') == 4
 assert code.index('Example 1') < code.index('Example 2') < code.index('np.histogram2d')     # the light curve comes first
-names, table = run_example(code, 1, **{'BIN = 10.0': 'BIN = 4.0'})
+names, table = run_example(code, 1, **{'BIN = 3.0': 'BIN = 4.0'})
 keep = table['SEL_TIME'] & table['SEL_REGION']
 assert np.allclose(names['edges'], [10, 14, 18, 20]) and np.allclose(names['exposure'], [4, 4, 2])   # (inside the GTI)
 assert names['counts'].sum() == keep.sum()                                  # FLATW x VIGW = 2 x 0.5 = 1 per event

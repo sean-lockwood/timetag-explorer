@@ -6,7 +6,7 @@ authors:
   - family-names: Lockwood
     given-names: Sean
     orcid: "https://orcid.org/0000-0002-0743-2645"
-version: 1.6.1
+version: 1.6.2
 license: BSD-3-Clause
 url: "https://explorer.planetarylightshow.com"
 repository-code: "https://github.com/sean-lockwood/timetag-explorer"
