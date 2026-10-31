@@ -13,6 +13,27 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
+## [1.5.0] - Unreleased
+
+**Selection scripts (version 2.1): the output file is smaller and the examples are rate-based. The corrected
+positions and the `FLATW` values are unchanged; `VIGW` changes only through the new vignetting default below.**
+
+* **Vignetting model (experimental, off by default): the default start row of the top ramp is now 1400 (was 1550).**
+  With the model on and the old default, results move; set `vigtop_start=1550.0` to reproduce them.
+* New `package_version_label()`: a short text for the running copy (`1.5.0`, or `1.5.0 (branch @ abc1234)` for a git
+  install, or `1.5.0 (dev, branch @ abc1234)` for a development checkout), used by the Explorer's page footer.
+* The north-up frame columns (`XRESTN`/`YRESTN`, `XPLANN`/`YPLANN`) are no longer written unless the script sets
+  `INCLUDE_NORTH_UP = True` (`make_tagsel(..., north_up=True)`), because they make the data product large. A region drawn
+  in a north-up frame is still tested in it.
+* The combined `WEIGHT` column is gone. An event counts as `FLATW` x `VIGW` (whichever exist); multiply the columns where
+  needed.
+* The commented examples at the end of a generated script are now two: a light curve (weighted counts per time bin,
+  divided by the good-time exposure in each bin) and an image in counts per second. Both build `keep` one flag per line
+  (`keep &= t['SEL_TIME']`), weight events by `FLATW` and `VIGW`, and read the time window from the primary header
+  (`SELTMIN`, `SELTMAX`) when `SEL_TIME` is used.
+* STIS columns carry the unit `seconds`, which the FITS standard does not list; astropy's `UnitsWarning` for it is
+  silenced in `make_tagsel` and in the examples.
+
 ## [1.4.2] - Unreleased
 
 **Fix: no result changes.**

@@ -11,28 +11,31 @@ are not changed. Added columns, in time-tag row order:
 * positions (`E`, float32, hi-res pixels counted from 1 like AXIS1 and AXIS2): `XCORR`, `YCORR` when the random
   sub-pixel offset or the geometric distortion correction is on (the image-frame position with both applied), and one
   pair per reference frame the exposure supports, from those corrected positions: `XREST`/`YREST` (target rest
-  frame), `XRESTN`/`YRESTN` (rest frame, north up), `XPLAN`/`YPLAN` and `XPLANN`/`YPLANN` (planet rest frame, and north
-  up, for moon observations);
-* weights (`E`): `FLATW` (flat field), `VIGW` (vignetting model, F25SRF2 only) and `WEIGHT` (their product), for
-  the corrections that are on.
+  frame) and `XPLAN`/`YPLAN` (planet rest frame, for moon observations). The north-up frames, `XRESTN`/`YRESTN` and
+  `XPLANN`/`YPLANN`, are written only with `north_up=True` (they make the file larger);
+* weights (`E`): `FLATW` (flat field) and `VIGW` (vignetting model, F25SRF2 only), for the corrections that are on.
+  An event's weight is their product; they are separate columns so either can be left out of a calculation.
 """
 from __future__ import annotations
 
+import functools
 import os
 import re
 import textwrap
 import urllib.request
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
+from astropy.units import UnitsWarning
 
 from . import config
 from .constants import EDGE_TRIM, FLAT_URL, RANDOM_SEED, TIME_DECIMALS, TimeSel
 from .dataset import TagDataset, _is_sorted, load_dataset
-from .frames import FRAMES, Corrections, frame_label, is_map, is_planet
+from .frames import FRAMES, Corrections, frame_label, is_map, is_north, is_planet
 from .regions import Region, region_source
 from .transforms import frame_coordinates, load_geo_lut
 
@@ -67,9 +70,10 @@ def _one_based(a: np.ndarray) -> np.ndarray:
 
 
 def selection_columns(ds: TagDataset, time_sel: TimeSel | None, region: Region | None, frame: str,
-                      corr: Corrections) -> TagselColumns:
+                      corr: Corrections, north_up: bool = False) -> TagselColumns:
     """Work out the columns a selection script adds (time order). Needs ephemerides (the network) only for planet
-    frames. A frame that cannot be built is skipped with its reason, unless the region was drawn in it."""
+    frames. A frame that cannot be built is skipped with its reason, unless the region was drawn in it. The north-up
+    frames' position columns are written only when `north_up` (a region drawn in one is still tested in it)."""
     out = TagselColumns()
     flags, positions = {}, {}
     n = len(ds.time)
@@ -94,7 +98,8 @@ def selection_columns(ds: TagDataset, time_sel: TimeSel | None, region: Region |
             if region is not None and f == frame:
                 raise RuntimeError(f'the region was drawn in the {frame_label(ds.frame_info, f)}, which cannot be '
                                    f'built: {exc}') from exc
-            out.skipped.append((frame_label(ds.frame_info, f), str(exc)))
+            if north_up or not is_north(f):
+                out.skipped.append((frame_label(ds.frame_info, f), str(exc)))
             continue
         if region is not None and f == frame:
             flags['SEL_REGION'] = np.asarray(region.contains(u, v), dtype=bool)
@@ -107,7 +112,7 @@ def selection_columns(ds: TagDataset, time_sel: TimeSel | None, region: Region |
                 what = ' and '.join(name for name, on in (('random sub-pixel offset', corr.randcorr),
                                                          ('geometric distortion', corr.geocorr)) if on)
                 out.history.append(f'XCORR, YCORR: the image-frame position with {what} applied')
-        else:
+        elif north_up or not is_north(f):
             xname, yname = POSITION_COLUMNS[f]
             positions[xname], positions[yname] = _one_based(u), _one_based(v)
             out.history.append(f'{xname}, {yname}: the position in the {frame_label(ds.frame_info, f)}, from the '
@@ -129,13 +134,10 @@ def selection_columns(ds: TagDataset, time_sel: TimeSel | None, region: Region |
         out.skipped.append(('flat field', ds.flat_problem or 'not available'))
     if flat is not None:
         arrays['FLATW'] = np.asarray(flat, dtype=np.float32)
-        out.history.append('FLATW: flat-field weight at the recorded pixel')
+        out.history.append('FLATW: flat-field weight at the recorded pixel; an event counts as FLATW x VIGW (where both exist)')
     if gain is not None:
         arrays['VIGW'] = gain
         out.history.append('VIGW: vignetting-model weight (experimental; F25SRF2 only) at the distortion-corrected row')
-    if flat is not None or gain is not None:
-        arrays['WEIGHT'] = (flat if gain is None else gain if flat is None else flat * gain).astype(np.float32)
-        out.history.append('WEIGHT: the product of the weights above; sum it over events for counts, divide by exposure for rates')
     return out
 
 
@@ -187,7 +189,7 @@ def fetch_inputs(rootname: str, folder: Path, corr: Corrections, log=print) -> P
             config.FLAT_FILE.parent.mkdir(parents=True, exist_ok=True)
             download_flat(config.FLAT_FILE)
         except Exception as exc:
-            log(f'  no flat field ({exc}); FLATW and WEIGHT will be left out')
+            log(f'  no flat field ({exc}); FLATW will be left out')
     return tag
 
 
@@ -275,9 +277,26 @@ def primary_keywords(ds: TagDataset, time_sel: TimeSel | None, region: Region | 
     return keys
 
 
+# STIS tables write the units 'seconds' and 'pixels', which the FITS standard does not list; astropy warns once per column
+UNIT_WARNING_PATTERN = r'.*did not parse as fits unit.*'
+
+
+def _quiet_unit_warning(function):
+    """Run `function` without astropy's warning that 'seconds' (the unit STIS writes for TIME) is not a FITS-standard
+    unit name. The FITS unit parser accepts only the standard names, so a custom unit cannot be enabled for it; the
+    warning is harmless (the values are read as written) and appears for every file."""
+    @functools.wraps(function)
+    def wrapper(*args, **kwargs):
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', category=UnitsWarning, message=UNIT_WARNING_PATTERN)
+            return function(*args, **kwargs)
+    return wrapper
+
+
+@_quiet_unit_warning
 def make_tagsel(rootname: str, *, time_sel: TimeSel | None = None, region: Region | None = None,
                 frame: str = 'image', corr: Corrections, script_version: str, tool_url: str,
-                folder='.', overwrite: bool = False, log=print) -> Path:
+                north_up: bool = False, folder='.', overwrite: bool = False, log=print) -> Path:
     """Download what is missing, work out the columns and write `<rootname>_tagsel.fits` in `folder`. Returns its path.
 
     Refuses to replace an existing output unless `overwrite`. Needs a network connection for files that are not in
@@ -302,7 +321,7 @@ def make_tagsel(rootname: str, *, time_sel: TimeSel | None = None, region: Regio
 
     log(f'Reading {tag_path.name} ...')
     ds = load_dataset(tag_path)
-    columns = selection_columns(ds, time_sel, region, frame, corr)
+    columns = selection_columns(ds, time_sel, region, frame, corr, north_up)
     for what, why in columns.skipped:
         log(f'  left out: {what} ({why})')
     log(f'{len(ds.time):,} events')

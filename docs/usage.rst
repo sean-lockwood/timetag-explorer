@@ -23,8 +23,10 @@ Selection scripts
 :func:`timetag_explorer.build_selection_script` returns a standalone Python script that reproduces a selection on the
 original TIME-TAG file and writes a copy of it, ``<rootname>_tagsel.fits``, with columns added: the selection flags
 (``SEL_TIME``, ``SEL_REGION``, ``EDGE_OK``), the corrected image-frame position (``XCORR``, ``YCORR``) and the position
-in each reference frame (``XREST``/``YREST``, ``XRESTN``/``YRESTN``, ``XPLAN``/``YPLAN``, ``XPLANN``/``YPLANN``), and the
-weights (``FLATW``, ``VIGW``, ``WEIGHT``); ``AXIS1`` and ``AXIS2`` are left as recorded. A selection is optional: without
+in each reference frame (``XREST``/``YREST`` and ``XPLAN``/``YPLAN``; the north-up versions ``XRESTN``/``YRESTN`` and
+``XPLANN``/``YPLANN`` make the file much larger and are written only if the script sets ``INCLUDE_NORTH_UP = True``), and
+the weights (``FLATW``, ``VIGW``; an event counts as their product, and there is no combined column); ``AXIS1`` and
+``AXIS2`` are left as recorded. A selection is optional: without
 one the corrections are still applied and the selection columns are simply absent. The primary header says which steps
 were performed (``RANDCORR``, ``GEOCORR``, ``FLATCORR``, ``VIGNCORR``, ``EXPTCORR``: ``PERFORM`` or ``OMIT``) and whether
 a time or space selection was made (``TIMESEL``, ``SPCSEL``). The script is short: it holds

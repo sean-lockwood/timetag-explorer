@@ -174,9 +174,10 @@ def to_file_order(flag, order):
     return out
 
 
-def reference_columns(te, ds, order, case, time_sel, region):
+def reference_columns(te, ds, order, case, time_sel, region, north_up=False):
     """The columns the script should write (in the file's row order), from the Explorer's own functions, in the order
-    they are written: flags, then positions, then weights."""
+    they are written: flags, then positions, then weights. The north-up frames' columns are left out unless
+    `north_up` (the scripts' INCLUDE_NORTH_UP, off by default); there is no combined WEIGHT column."""
     frame, shape, selection, (rand, geo, flat, edge) = case
     corr = te.Corrections(randcorr=rand, geocorr=geo, flatcorr=flat, timecorr=edge)
     flags, positions, weights = {}, {}, {}
@@ -196,6 +197,8 @@ def reference_columns(te, ds, order, case, time_sel, region):
     for f, names in (('image', ('XCORR', 'YCORR')),) + tuple(te.POSITION_COLUMNS.items()):
         if f == 'image' and not (rand or geo):
             continue
+        if f.endswith('_north') and not north_up:
+            continue
         try:
             if f != 'image':
                 ds.prepare_frame(f)
@@ -209,8 +212,6 @@ def reference_columns(te, ds, order, case, time_sel, region):
         weights['FLATW'] = np.asarray(flat_w, dtype=np.float32)
     if gain is not None:
         weights['VIGW'] = gain
-    if weights:
-        weights['WEIGHT'] = (flat_w if gain is None else gain if flat_w is None else flat_w * gain).astype(np.float32)
     return {name: to_file_order(values, order) for name, values in {**flags, **positions, **weights}.items()}
 
 
