@@ -74,6 +74,17 @@ for time_sel, region, frame, corr in cases:
     if region is not None:
         assert region.describe() in s.code        # the region is written out in words, too
 
+# A region drawn in the app holds numpy floats; the script must not need numpy to run its REGION line
+for drawn in (Box(*np.array([508.08, 819.27, 1192.6, 1452.37])), Circle(*np.array([600.5, 700.25, 50.125])),
+              Polygon(tuple((np.float64(a), np.float64(b)) for a, b in ((500.5, 500.25), (700.0, 500.0), (600.0, 700.5))))):
+    s = tte.build_selection_script(ds, None, drawn, 'image', OFF)
+    line = next(l for l in s.code.splitlines() if l.startswith('REGION = '))
+    assert 'np.' not in line and 'float64' not in s.code, line
+    names = {}
+    exec('from timetag_explorer.regions import Box, Circle, Polygon\n' + line, names)   # (no numpy imported)
+    assert names['REGION'] == drawn and all(type(v) is float for v in vars(names['REGION']).values() if not isinstance(v, tuple))
+    assert tagsel.region_source(drawn) in s.code
+
 # vignetting is written only for an exposure it applies to
 other = dataset(np.linspace(0, 99, n), np.full(n, 600), np.full(n, 700)); other.aperture = '52X2'
 s = tte.build_selection_script(other, (1.0, 2.0), None, 'image', replace(OFF, vigcorr=True))
