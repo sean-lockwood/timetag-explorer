@@ -16,7 +16,7 @@ from timetag_explorer.frames import Corrections, FrameInfo
 from timetag_explorer.regions import Box, Circle, Polygon
 from timetag_explorer.transforms import frame_coordinates
 
-assert tte.SELECTION_SCRIPT_VERSION == '2.2'
+assert tte.SELECTION_SCRIPT_VERSION == '2.3'
 assert tuple(EDGE_TRIM) == (30, 6, 28, 6)
 
 n = 200
@@ -317,6 +317,7 @@ cards = tagsel.primary_keywords(exp, (20.0, 60.0), box, 'image', on, cols_, '2.0
 names = [k for k, _, _ in cards]
 assert names[:8] == ['TTERAND', 'TTEGEO', 'TTEFLAT', 'TTEVIGN', 'TTEEDGE', 'TTEFFILE', 'TTETSEL', 'TTERSEL'], names
 assert names[-3:] == ['SELVER', 'TTEVER', 'SELURL'] and len(set(names)) == len(names)
+assert not any('DONE or OMIT' in c for _, _, c in cards)     # (the value says it)
 # every card fits the 80 characters of a FITS card (value padded as astropy writes it)
 for key, value, comment in cards:
     width = 8 + 2 + (max(len(value), 8) + 2 if isinstance(value, str) else 20 if not isinstance(value, bool) else 20)
