@@ -26,7 +26,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=2.0",
-    "astropy>=7.0",
+    "astropy>=7.2",     # 7.0 and 7.1 cannot be imported with NumPy 2.4 or later (np.in1d is gone)
     "matplotlib>=3.9",      # only for its point-in-polygon test
     "astroquery>=0.4.10",   # JPL Horizons, for the planet frames and maps
 ]

@@ -13,6 +13,14 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
+## [1.4.2] - Unreleased
+
+**Fix: no result changes.**
+
+* The package now requires `astropy>=7.2`. astropy 7.0 and 7.1 fail on import (`module 'numpy' has no attribute 'in1d'`,
+  from `astropy.units`, which `astroquery` loads) when NumPy 2.4 or later is installed, which broke the selection
+  scripts' MAST download in such environments. Upgrade with `pip install -U "astropy>=7.2"`.
+
 ## [1.4.1] - Unreleased
 
 **Fix: no result changes** (`SELECTION_SCRIPT_VERSION` stays 2.0).
