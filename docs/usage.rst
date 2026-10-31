@@ -21,7 +21,13 @@ Selection scripts
 -----------------
 
 :func:`timetag_explorer.build_selection_script` returns a standalone Python script that reproduces a selection on the
-original TIME-TAG file and writes flag columns into a copy of it. The version of the script generator,
+original TIME-TAG file and writes a copy of it, ``<rootname>_tagsel.fits``, with columns added: the selection flags
+(``SEL_TIME``, ``SEL_REGION``, ``EDGE_OK``), the corrected image-frame position (``XCORR``, ``YCORR``) and the position
+in each reference frame (``XREST``/``YREST``, ``XRESTN``/``YRESTN``, ``XPLAN``/``YPLAN``, ``XPLANN``/``YPLANN``), and the
+weights (``FLATW``, ``VIGW``, ``WEIGHT``); ``AXIS1`` and ``AXIS2`` are left as recorded. The script is short: it holds
+the choices and calls :func:`timetag_explorer.tagsel.make_tagsel`, and it names the exact version of this package that
+the Explorer ran (and the ``pip install`` line for it). The region is tested at each event's own position, not on the
+Explorer's 4-pixel bins. The version of the script generator,
 :data:`timetag_explorer.SELECTION_SCRIPT_VERSION`, is written into every script and into the ``SELVER`` keyword of the
 FITS files they write; it is raised whenever a generated script would compute or write something different.
 
@@ -39,6 +45,7 @@ Module                     Contents
 ``dataset``                ``TagDataset``: events, slicing in time, binning, light curves, count-rate images
 ``analysis``               areas, mean brightness and the exposure for a selection
 ``selection_script``       the generator of selection scripts (and its version, ``SELVER``)
+``tagsel``                 what a selection script runs: flags, corrected positions and weights in ``_tagsel.fits``
 ``gdcorr``                 the geometric distortion polynomial (placeholder coefficients for now)
 ``vignette``               the experimental vignetting model (F25SRF2 only; off by default)
 ``constants``, ``config``  shared numbers; file locations; logging
