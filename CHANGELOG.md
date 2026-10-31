@@ -13,6 +13,15 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
+## [1.4.1] - Unreleased
+
+**Fix: no result changes** (`SELECTION_SCRIPT_VERSION` stays 2.0).
+
+* A selection script for a region drawn in the Explorer failed at its `REGION = ...` line unless numpy had been imported
+  first, because the region held numpy floats, which NumPy 2 writes as `np.float64(...)`. Regions are now written with
+  plain floats (`regions.region_source`), in the script and in the file's HISTORY. 1.4.0 scripts that use a box, circle
+  or free-form region from the app need this version.
+
 ## [1.4.0] - Unreleased
 
 **Selection scripts are rebuilt on the package** (`SELECTION_SCRIPT_VERSION` 2.0). No number the Explorer shows changes;
