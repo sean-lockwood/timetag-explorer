@@ -29,7 +29,7 @@ RANDOM_SEED = 0          # fixed, so repeated renders of one dataset agree
 # files they produce, and the number is written into both (docstring, SCRIPT_VERSION, the SELVER header
 # keyword, HISTORY), so raise it whenever build_selection_script changes what the script computes or
 # writes (not for wording changes in the dialog).
-SELECTION_SCRIPT_VERSION = '2.1'   # 2.1: north-up frame columns only with INCLUDE_NORTH_UP, no WEIGHT column, light-curve and count-rate examples; 2.0: the script calls the package (tagsel); exact region test; XCORR/YCORR, frame and weight columns; 1.2: EDGE_OK uses a different trim on each side; 1.1: column coordinate keywords kept
+SELECTION_SCRIPT_VERSION = '2.2'   # 2.2: own header keywords (TTERAND ... TTEEDGE: DONE/OMIT, TTEFFILE, TTETSEL, TTERSEL) in one labelled block; 2.1: north-up frame columns only with INCLUDE_NORTH_UP, no WEIGHT column, light-curve and count-rate examples; 2.0: the script calls the package (tagsel); exact region test; XCORR/YCORR, frame and weight columns; 1.2: EDGE_OK uses a different trim on each side; 1.1: column coordinate keywords kept
 DEFAULT_TOOL_URL = 'https://explorer.planetarylightshow.com'   # TAG_EXPLORER_URL, when set, takes its place
 MAX_CACHED_FRAMES = 2    # per dataset; each cached frame costs 4 bytes per event
 EVENT_CHUNK = 1 << 20    # events handled at a time, so temporary arrays stay small whatever the file size

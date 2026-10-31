@@ -28,8 +28,11 @@ in each reference frame (``XREST``/``YREST`` and ``XPLAN``/``YPLAN``; the north-
 the weights (``FLATW``, ``VIGW``; an event counts as their product, and there is no combined column); ``AXIS1`` and
 ``AXIS2`` are left as recorded. A selection is optional: without
 one the corrections are still applied and the selection columns are simply absent. The primary header says which steps
-were performed (``RANDCORR``, ``GEOCORR``, ``FLATCORR``, ``VIGNCORR``, ``EXPTCORR``: ``PERFORM`` or ``OMIT``) and whether
-a time or space selection was made (``TIMESEL``, ``SPCSEL``). The script is short: it holds
+were done (``TTERAND``, ``TTEGEO``, ``TTEFLAT``, ``TTEVIGN``, ``TTEEDGE``: ``DONE`` or ``OMIT``), the flat-field file used
+(``TTEFFILE``) and whether a time or space selection was made (``TTETSEL``, ``TTERSEL``), in one block under the label
+``/ TIMETAG-EXPLORER KEYWORDS``. They are deliberately not the calibration pipeline's step keywords (``RANDCORR``,
+``FLATCORR`` and so on, whose ``PERFORM`` means something else to ``calstis`` and ``stistools``), which are left as they
+were. The script is short: it holds
 the choices and calls :func:`timetag_explorer.tagsel.make_tagsel`, and it names the exact version of this package that
 the Explorer ran (and the ``pip install`` line for it). The region is tested at each event's own position, not on the
 Explorer's 4-pixel bins. The version of the script generator,
