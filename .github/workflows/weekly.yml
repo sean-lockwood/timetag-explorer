@@ -13,7 +13,8 @@ permissions:
 jobs:
   selection-scripts:
     # Builds the selection scripts, runs them with the real astropy on one exposure downloaded from AWS / MAST,
-    # and compares their flags with the package's own masks (see validation/check_selection_scripts.py).
+    # and compares the columns they write (flags, positions, weights) with the package's own numbers (see
+    # validation/check_selection_scripts.py).
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
