@@ -304,12 +304,21 @@ def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
         header = new[0].header
         host = te.tool_url().split('://')[-1]
         history = '\n'.join(str(c) for c in new[1].header['HISTORY']) + '\n' + '\n'.join(str(c) for c in header['HISTORY'])
-        # which steps ran: PERFORM only when the step took effect (its columns were written)
-        done = {'RANDCORR': rand, 'GEOCORR': geo, 'FLATCORR': 'FLATW' in expected, 'VIGNCORR': 'VIGW' in expected,
-                'EXPTCORR': 'EDGE_OK' in expected}
-        checks = [(header.get(key) == ('PERFORM' if on else 'OMIT'), f'{key} {header.get(key)!r}') for key, on in done.items()]
-        checks += [(header.get('TIMESEL') is (selection in ('time', 'both')), f'TIMESEL {header.get("TIMESEL")!r}'),
-                   (header.get('SPCSEL') is (region is not None), f'SPCSEL {header.get("SPCSEL")!r}'),
+        # which steps ran: DONE only when the step took effect (its columns were written)
+        done = {'TTERAND': rand, 'TTEGEO': geo, 'TTEFLAT': 'FLATW' in expected, 'TTEVIGN': 'VIGW' in expected,
+                'TTEEDGE': 'EDGE_OK' in expected}
+        checks = [(header.get(key) == ('DONE' if on else 'OMIT'), f'{key} {header.get(key)!r}') for key, on in done.items()]
+        # this tool's keywords form one block under the label card, in the order the package writes them, and the
+        # calibration pipeline's own step keywords are untouched (they are compared with the original file below)
+        label = '/ TIMETAG-EXPLORER KEYWORDS'
+        cards = list(header.cards)
+        at = next((k for k, c in enumerate(cards) if c.keyword == '' and str(c.value).strip() == label), None)
+        block = [] if at is None else [c.keyword for c in cards[at + 1:]]
+        checks += [(bool(block) and block[0] == 'TTERAND', f'the "{label}" label card, then TTERAND first (got {block[:1]})'),
+                   (not {'TIMESEL', 'SPCSEL'} & set(header), 'TIMESEL / SPCSEL must not be written'),
+                   ((header.get('TTEFFILE') == 'combined_flat.fits') == done['TTEFLAT'], f'TTEFFILE {header.get("TTEFFILE")!r}')]
+        checks += [(header.get('TTETSEL') is (selection in ('time', 'both')), f'TTETSEL {header.get("TTETSEL")!r}'),
+                   (header.get('TTERSEL') is (region is not None), f'TTERSEL {header.get("TTERSEL")!r}'),
                    (('SEL_TIME' in expected) == (selection in ('time', 'both')), 'SEL_TIME column presence'),
                    (('SEL_REGION' in expected) == (region is not None), 'SEL_REGION column presence'),
                    (header.get('SELVER') == te.SELECTION_SCRIPT_VERSION, f'SELVER {header.get("SELVER")!r}'),
@@ -317,7 +326,7 @@ def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
                    (host in str(header.get('SELURL', '')), f'SELURL {header.get("SELURL")!r}'),
                    (host in history, 'tool URL missing from HISTORY'),
                    ('v' + te.SELECTION_SCRIPT_VERSION in history, 'script version missing from HISTORY')]
-        if done['EXPTCORR']:
+        if done['TTEEDGE']:
             checks += [(header.get(key) == pixels, f'{key} {header.get(key)!r}, expected {pixels}')
                        for key, pixels in zip(('SELEDGEL', 'SELEDGER', 'SELEDGEB', 'SELEDGET'), te.EDGE_TRIM)]
         if region is not None:
@@ -335,10 +344,9 @@ def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
                 lost.append(key)
             elif not same_value(new[1].header[key], old[1].header[key]):
                 changed.append(key)
-        # ... and the primary header keeps its keywords too, except the five step flags the script sets itself
-        steps = ('RANDCORR', 'GEOCORR', 'FLATCORR', 'VIGNCORR', 'EXPTCORR')
+        # ... and the primary header keeps every one of its keywords (the pipeline's RANDCORR ... included)
         for key in dict.fromkeys(old[0].header):
-            if key in steps or key in ('COMMENT', 'HISTORY', ''):
+            if key in ('COMMENT', 'HISTORY', ''):
                 continue
             if key not in new[0].header:
                 lost.append('primary ' + key)

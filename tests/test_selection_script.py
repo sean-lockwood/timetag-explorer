@@ -16,7 +16,7 @@ from timetag_explorer.frames import Corrections, FrameInfo
 from timetag_explorer.regions import Box, Circle, Polygon
 from timetag_explorer.transforms import frame_coordinates
 
-assert tte.SELECTION_SCRIPT_VERSION == '2.1'
+assert tte.SELECTION_SCRIPT_VERSION == '2.2'
 assert tuple(EDGE_TRIM) == (30, 6, 28, 6)
 
 n = 200
@@ -301,23 +301,39 @@ def header(time_sel, region, frame, corr, dsx=exp):
     return {k: v for k, v, c in tagsel.primary_keywords(dsx, time_sel, region, frame, corr, cols, '2.0', 'https://x')}
 
 h = header((20.0, 60.0), box, 'image', on)
-assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['PERFORM', 'OMIT', 'PERFORM', 'OMIT', 'PERFORM'], h     # rand, geo, flat, vign, expt
-assert h['TIMESEL'] is True and h['SPCSEL'] is True and (h['SELTMIN'], h['SELTMAX']) == (20.0, 60.0)
+assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['DONE', 'OMIT', 'DONE', 'OMIT', 'DONE'], h     # rand, geo, flat, vign, edge
+assert tagsel.STEP_KEYWORDS == ('TTERAND', 'TTEGEO', 'TTEFLAT', 'TTEVIGN', 'TTEEDGE')
+assert h['TTEFFILE'] == 'combined_flat.fits'                  # the flat file used (not PFLTFILE / LFLTFILE)
+assert h['TTETSEL'] is True and h['TTERSEL'] is True and (h['SELTMIN'], h['SELTMAX']) == (20.0, 60.0)
 assert h['SELREG'] == 'box' and h['SELFRAME'] == 'image' and h['RANDSEED'] == RANDOM_SEED
 assert (h['SELEDGEL'], h['SELEDGER'], h['SELEDGEB'], h['SELEDGET']) == tuple(EDGE_TRIM)
 assert h['SELVER'] == '2.0' and h['TTEVER'] == tte.__version__ and h['SELURL'] == 'https://x' and 'VIGBSTRT' not in h
+# none of the calibration pipeline's keywords (stistools reads them) is written, and 'PERFORM' never appears
+pipeline = {'RANDCORR', 'GEOCORR', 'FLATCORR', 'VIGNCORR', 'EXPTCORR', 'TIMESEL', 'SPCSEL', 'PFLTFILE', 'LFLTFILE'}
+assert not pipeline & set(h) and 'PERFORM' not in h.values()
+# the flag keywords sit together, first, then the flat file, then the selections
+cols_ = tagsel.selection_columns(exp, (20.0, 60.0), box, 'image', on)
+cards = tagsel.primary_keywords(exp, (20.0, 60.0), box, 'image', on, cols_, '2.0', 'https://x')
+names = [k for k, _, _ in cards]
+assert names[:8] == ['TTERAND', 'TTEGEO', 'TTEFLAT', 'TTEVIGN', 'TTEEDGE', 'TTEFFILE', 'TTETSEL', 'TTERSEL'], names
+assert names[-3:] == ['SELVER', 'TTEVER', 'SELURL'] and len(set(names)) == len(names)
+# every card fits the 80 characters of a FITS card (value padded as astropy writes it)
+for key, value, comment in cards:
+    width = 8 + 2 + (max(len(value), 8) + 2 if isinstance(value, str) else 20 if not isinstance(value, bool) else 20)
+    assert width + (3 + len(comment) if comment else 0) <= 80 or isinstance(value, str) and len(value) > 40, (key, width, comment)
 h = header((20.0, 60.0), None, 'image', OFF)
-assert h['TIMESEL'] is True and h['SPCSEL'] is False and 'SELREG' not in h
-assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['OMIT'] * 5 and 'RANDSEED' not in h and 'SELEDGEL' not in h
+assert h['TTETSEL'] is True and h['TTERSEL'] is False and 'SELREG' not in h
+assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['OMIT'] * 5 and 'RANDSEED' not in h and 'SELEDGEL' not in h and 'TTEFFILE' not in h
 h = header(None, None, 'image', replace(OFF, geocorr=True))
-assert h['TIMESEL'] is False and h['SPCSEL'] is False and h['GEOCORR'] == 'PERFORM' and h['RANDCORR'] == 'OMIT'
-# a step is PERFORM only if it took effect: no flat found, or a vignetting model for another aperture
-assert header(None, None, 'image', on, noflat)['FLATCORR'] == 'OMIT'
+assert h['TTETSEL'] is False and h['TTERSEL'] is False and h['TTEGEO'] == 'DONE' and h['TTERAND'] == 'OMIT'
+# a step is DONE only if it took effect: no flat found, or a vignetting model for another aperture
+h = header(None, None, 'image', on, noflat)
+assert h['TTEFLAT'] == 'OMIT' and 'TTEFFILE' not in h
 other_ap = dataset(t, xs, ys, weight=w); other_ap.aperture = '52X2'
-assert header(None, None, 'image', vig, other_ap)['VIGNCORR'] == 'OMIT'
+assert header(None, None, 'image', vig, other_ap)['TTEVIGN'] == 'OMIT'
 sens.aperture = 'F25SRF2'
 h = header(None, None, 'image', vig, sens)
-assert h['VIGNCORR'] == 'PERFORM' and (h['VIGBSTRT'], h['VIGBEND'], h['VIGBLOSS']) == (128.0, 28.0, 0.05)
+assert h['TTEVIGN'] == 'DONE' and (h['VIGBSTRT'], h['VIGBEND'], h['VIGBLOSS']) == (128.0, 28.0, 0.05)
 assert (h['VIGTSTRT'], h['VIGTEND'], h['VIGTLOSS']) == (1400.0, 2047.0, 0.23)
 assert all(len(k) <= 8 for k in h)                          # FITS keywords
 

@@ -13,6 +13,22 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
+## [1.6.0] - Unreleased
+
+**Selection scripts (version 2.2): the primary-header keywords change. No computed numbers or columns change.**
+
+* The step keywords no longer reuse the calibration pipeline's names, so later `stistools` / `calstis` processing of the
+  file cannot be confused: `RANDCORR` -> `TTERAND`, `GEOCORR` -> `TTEGEO`, `FLATCORR` -> `TTEFLAT`, `VIGNCORR` ->
+  `TTEVIGN`, `EXPTCORR` -> `TTEEDGE` (the edge-trim flag `EDGE_OK`; not the pipeline's exposure-time step), `TIMESEL` ->
+  `TTETSEL`, `SPCSEL` -> `TTERSEL`. The values are `DONE` or `OMIT` (`PERFORM` is the pipeline's input state). The
+  pipeline's own keywords in the original file are no longer overwritten.
+* New `TTEFFILE`: the name of the flat-field file used (written when the flat field was applied; not `PFLTFILE` or
+  `LFLTFILE`).
+* All of the tool's keywords form one block at the end of the primary header, under a `/ TIMETAG-EXPLORER KEYWORDS`
+  label: the step flags together, then `TTEFFILE`, the selections and their numbers, then the versions.
+  The other keywords (`SELTMIN`, `SELTMAX`, `SELREG`, `SELFRAME`, `RANDSEED`, `VIG*`, `SELEDGE*`, `SELVER`, `TTEVER`,
+  `SELURL`) keep their names.
+
 ## [1.5.0] - Unreleased
 
 **Selection scripts (version 2.1): the output file is smaller and the examples are rate-based. The corrected

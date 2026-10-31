@@ -202,12 +202,13 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
                  'floating point, so it is a little larger. Other original columns are unchanged.')
     if time_sel is None and region is None:
         notes.append('No time range or region was selected, so the file has no `SEL_TIME` / `SEL_REGION` columns '
-                     '(`TIMESEL` and `SPCSEL` are False): the corrections, positions and weights are still written.')
-    notes.append('The primary header says which steps ran: `RANDCORR`, `GEOCORR`, `FLATCORR`, `VIGNCORR`, `EXPTCORR` '
-                 '(`PERFORM` or `OMIT`; a step is `OMIT` when it was off or could not take effect, such as the '
-                 'vignetting model for an aperture other than F25SRF2). Where the calibration pipeline had already put a '
-                 'keyword of that name, its original value is noted in the HISTORY. `TIMESEL` and `SPCSEL` are True '
-                 'when a time range or a region was selected.')
+                     '(`TTETSEL` and `TTERSEL` are False): the corrections, positions and weights are still written.')
+    notes.append('The primary header ends with one block of this tool’s keywords, under `/ TIMETAG-EXPLORER KEYWORDS`. '
+                 '`TTERAND`, `TTEGEO`, `TTEFLAT`, `TTEVIGN`, `TTEEDGE` say which steps ran (`DONE` or `OMIT`; a step is '
+                 '`OMIT` when it was off or could not take effect, such as the vignetting model for an aperture other '
+                 'than F25SRF2), `TTEFFILE` names the flat-field file used, and `TTETSEL` and `TTERSEL` are True when a '
+                 'time range or a region was selected. They are separate from the calibration pipeline’s own keywords '
+                 '(`RANDCORR`, `FLATCORR` ...), which are left as they were, so `stistools` is unaffected.')
     notes.append(f'Script version {version}. It is written into the output file’s header (with the package version), so '
                  'keep the numbers if you report results.')
 
@@ -241,8 +242,8 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
     add('  2. Flags the selected events (True = selected, if any selection was made) and adds the corrected')
     add('     positions and weights.')
     add(f'  3. Writes {output}: the TAG file with those columns added. The primary header records')
-    add('     which steps were performed (RANDCORR, GEOCORR, FLATCORR, VIGNCORR, EXPTCORR), whether a time or')
-    add('     space selection was made (TIMESEL, SPCSEL), and the script and package versions.')
+    add('     which steps were done (TTERAND, TTEGEO, TTEFLAT, TTEVIGN, TTEEDGE), the flat file (TTEFFILE), whether a')
+    add('     time or space selection was made (TTETSEL, TTERSEL), and the script and package versions.')
     add('"""')
     add('import timetag_explorer')
     add('from timetag_explorer.frames import Corrections')

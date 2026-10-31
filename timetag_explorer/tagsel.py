@@ -235,39 +235,44 @@ def column_definition(name: str, values: np.ndarray):
                        unit='pixel' if name[0] in 'XY' else None)
 
 
-STEP_KEYWORDS = ('RANDCORR', 'GEOCORR', 'FLATCORR', 'VIGNCORR', 'EXPTCORR')
+# The primary-header keywords are this tool's own (prefix TTE), never the calibration pipeline's step keywords
+# (RANDCORR, FLATCORR ... mean PERFORM/OMIT/COMPLETE to calstis and stistools), so later processing is unaffected.
+STEP_KEYWORDS = ('TTERAND', 'TTEGEO', 'TTEFLAT', 'TTEVIGN', 'TTEEDGE')   # DONE or OMIT
+KEYWORD_GROUP = 'TIMETAG-EXPLORER KEYWORDS'                                # the label above the block, `/ TIMETAG-EXPLORER KEYWORDS`
 
 
 def primary_keywords(ds: TagDataset, time_sel: TimeSel | None, region: Region | None, frame: str, corr: Corrections,
                      columns: TagselColumns, script_version: str, tool_url: str) -> list:
-    """(keyword, value, comment) for the primary header: which steps were performed, which selections were made, and
-    the versions and numbers behind them. A step is PERFORM only when it took effect (the flat field must have been
-    found, the vignetting model must apply to this aperture); otherwise OMIT. Needs no FITS library."""
+    """(keyword, value, comment) for the primary header, in the order they are written as one block: which steps were
+    done (DONE or OMIT), the flat file used, which selections were made, and the numbers and versions behind them. A
+    step is DONE only when it took effect (the flat field must have been found, the vignetting model must apply to
+    this aperture); otherwise OMIT. Needs no FITS library."""
     from . import __version__
-    done = {'RANDCORR': bool(corr.randcorr), 'GEOCORR': bool(corr.geocorr), 'FLATCORR': 'FLATW' in columns.arrays,
-            'VIGNCORR': 'VIGW' in columns.arrays, 'EXPTCORR': 'EDGE_OK' in columns.arrays}
-    what = {'RANDCORR': 'random sub-pixel offset (XCORR, YCORR and the frame columns)',
-            'GEOCORR': 'geometric distortion correction (XCORR, YCORR and the frame columns)',
-            'FLATCORR': 'flat-field weights (FLATW)', 'VIGNCORR': 'vignetting model, F25SRF2 only (VIGW)',
-            'EXPTCORR': 'detector-edge trim flag (EDGE_OK)'}
-    keys = [(key, 'PERFORM' if done[key] else 'OMIT', f'{what[key]}: performed or omitted') for key in STEP_KEYWORDS]
-    keys += [('TIMESEL', time_sel is not None, 'a time selection was made (SEL_TIME)'),
-             ('SPCSEL', region is not None, 'a region was selected (SEL_REGION)')]
+    done = {'TTERAND': bool(corr.randcorr), 'TTEGEO': bool(corr.geocorr), 'TTEFLAT': 'FLATW' in columns.arrays,
+            'TTEVIGN': 'VIGW' in columns.arrays, 'TTEEDGE': 'EDGE_OK' in columns.arrays}
+    what = {'TTERAND': 'random sub-pixel offset', 'TTEGEO': 'geometric distortion',
+            'TTEFLAT': 'flat-field weights FLATW', 'TTEVIGN': 'vignetting model VIGW',
+            'TTEEDGE': 'edge-trim flag EDGE_OK'}   # (short: a FITS card holds 80 characters, value included)
+    keys = [(key, 'DONE' if done[key] else 'OMIT', f'{what[key]}: DONE or OMIT') for key in STEP_KEYWORDS]
+    if done['TTEFLAT']:
+        keys.append(('TTEFFILE', config.FLAT_FILE.name, 'flat-field file used for FLATW'))
+    keys += [('TTETSEL', time_sel is not None, 'a time selection was made (SEL_TIME)'),
+             ('TTERSEL', region is not None, 'a region was selected (SEL_REGION)')]
     if time_sel is not None:
         keys += [('SELTMIN', float(time_sel[0]), '[s] SEL_TIME window start'),
                  ('SELTMAX', float(time_sel[1]), '[s] SEL_TIME window end')]
     if region is not None:
         keys += [('SELREG', region.kind, 'SEL_REGION shape'), ('SELFRAME', frame, 'SEL_REGION reference frame')]
-    if done['RANDCORR']:
+    if done['TTERAND']:
         keys.append(('RANDSEED', RANDOM_SEED, 'seed of the random sub-pixel offsets'))
-    if done['VIGNCORR']:
+    if done['TTEVIGN']:
         keys += [('VIGBSTRT', float(corr.vigbot_start), '[pix] bottom ramp starts at this row (0-indexed)'),
                  ('VIGBEND', float(corr.vigbot_end), '[pix] bottom ramp: row where the loss is reached'),
                  ('VIGBLOSS', float(corr.vigbot_loss), 'bottom ramp: fractional loss at that row'),
                  ('VIGTSTRT', float(corr.vigtop_start), '[pix] top ramp starts at this row (0-indexed)'),
                  ('VIGTEND', float(corr.vigtop_end), '[pix] top ramp: row where the loss is reached'),
                  ('VIGTLOSS', float(corr.vigtop_loss), 'top ramp: fractional loss at that row')]
-    if done['EXPTCORR']:
+    if done['TTEEDGE']:
         keys += [(key, pixels, f'[pix] EDGE_OK trim of the {side} edge') for key, side, pixels in (
             ('SELEDGEL', 'left', EDGE_TRIM.left), ('SELEDGER', 'right', EDGE_TRIM.right),
             ('SELEDGEB', 'bottom', EDGE_TRIM.bottom), ('SELEDGET', 'top', EDGE_TRIM.top))]
@@ -356,17 +361,18 @@ def make_tagsel(rootname: str, *, time_sel: TimeSel | None = None, region: Regio
             for line in textwrap.wrap(text, 68):
                 header.add_history(line)
         primary = hdul[0].header
-        replaced = []
-        for key, value, comment in primary_keywords(ds, time_sel, region, frame, corr, columns, script_version, tool_url):
-            if key in STEP_KEYWORDS and key in primary and primary[key] != value:
-                replaced.append(f'{key} was {primary[key]!r}')
-            primary[key] = (value, comment)
-        primary.add_history('Columns added to extension 1; see its HISTORY. The processing steps and selections are '
-                            'the keywords here (RANDCORR ... EXPTCORR, TIMESEL, SPCSEL, SELVER, TTEVER).')
-        if replaced:   # the calibration pipeline's own flags of these names now say what this script did instead
-            for line in textwrap.wrap('Values these step keywords had in the original file (the calibration '
-                                      'pipeline\'s): ' + '; '.join(replaced), 68):
-                primary.add_history(line)
+        # One block at the end of the header, under a label card. (useblanks=False: the label is a blank-keyword card,
+        # which astropy would otherwise reuse as free space for the next keyword.) The calibration pipeline's own
+        # keywords are left exactly as they were.
+        keywords = primary_keywords(ds, time_sel, region, frame, corr, columns, script_version, tool_url)
+        for key, _, _ in keywords:
+            if key in primary:
+                del primary[key]
+        primary.append(('', f'/ {KEYWORD_GROUP}'), useblanks=False)
+        for card in keywords:
+            primary.append(card, useblanks=False)
+        primary.add_history('Columns added to extension 1; see its HISTORY. The processing steps, the flat file and '
+                            f'the selections are the {KEYWORD_GROUP.lower()} (TTE...) of this header.')
         hdul[1] = table
         part = output.with_name(output.name + '.part')   # written aside, so a failure never leaves a broken output
         try:
