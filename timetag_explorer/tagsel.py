@@ -118,6 +118,9 @@ def selection_columns(ds: TagDataset, time_sel: TimeSel | None, region: Region |
             out.history.append(f'{xname}, {yname}: the position in the {frame_label(ds.frame_info, f)}, from the '
                                'corrected positions')
         del u, v
+    # Always the same order (XCORR, YCORR, then the frames as listed in POSITION_COLUMNS), whichever frame was built first.
+    order = ['XCORR', 'YCORR'] + [name for pair in POSITION_COLUMNS.values() for name in pair]
+    positions = {name: positions[name] for name in order if name in positions}
     valid = ds.valid_events(corr)
     if valid is not None:
         flags['EDGE_OK'] = np.array(valid, dtype=bool)

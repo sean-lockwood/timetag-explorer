@@ -16,7 +16,7 @@ from timetag_explorer.frames import Corrections, FrameInfo
 from timetag_explorer.regions import Box, Circle, Polygon
 from timetag_explorer.transforms import frame_coordinates
 
-assert tte.SELECTION_SCRIPT_VERSION == '2.3'
+assert tte.SELECTION_SCRIPT_VERSION == '2.4'
 assert tuple(EDGE_TRIM) == (30, 6, 28, 6)
 
 n = 200
@@ -175,6 +175,10 @@ assert list(full.arrays) == ['SEL_TIME', 'SEL_REGION', 'EDGE_OK', 'XCORR', 'YCOR
                              'FLATW'], list(full.arrays)
 assert [name for name, _ in full.skipped] == ['Planet rest frame', 'Planet rest frame, north up'], full.skipped
 assert np.array_equal(full.arrays['XREST'], a['XREST'])
+# a region drawn in the rest frame builds that frame first, but the columns come out in the same order
+in_rest = tagsel.selection_columns(exp, (20.0, 60.0), Box(900.0, 1300.0, 900.0, 1100.0), 'rest', on, north_up=True)
+assert list(in_rest.arrays) == list(full.arrays), list(in_rest.arrays)
+assert np.array_equal(in_rest.arrays['XCORR'], a['XCORR']) and np.array_equal(in_rest.arrays['XREST'], a['XREST'])
 assert all(len(v) == m for v in a.values())
 # the time flag: the same events as the Explorer's time slice
 assert np.array_equal(np.flatnonzero(a['SEL_TIME']), np.arange(*exp.time_slice((20.0, 60.0)).indices(m)))
