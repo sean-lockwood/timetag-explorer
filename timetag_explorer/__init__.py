@@ -7,7 +7,7 @@ positions between reference frames and planet maps, and writes the short selecti
 """
 from __future__ import annotations
 
-__version__ = '1.6.2'
+__version__ = '1.6.3'
 
 from .analysis import describe_selection
 from .constants import SELECTION_SCRIPT_VERSION

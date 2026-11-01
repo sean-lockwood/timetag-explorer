@@ -13,6 +13,12 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
+## [1.6.3] - Unreleased
+
+**Column order fix; no values or numbers change (selection script 2.4).**
+
+* When the region was drawn in a rest or planet frame, the position columns of that frame were written ahead of `XCORR`, `YCORR`. They now always come out in the documented order: `XCORR`, `YCORR`, then the frames as listed (`XREST`, `YREST`, ...). Found by the weekly real-data check.
+
 ## [1.6.2] - Unreleased
 
 **Wording and an example default; no values, columns or numbers change (selection script stays 2.3).**
