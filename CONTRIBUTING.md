@@ -14,6 +14,11 @@ Open an issue with the "Science question or concern" form. It helps to say which
 [VALIDATION.md](VALIDATION.md)), what you expected and why (an equation, a handbook, a reference file), and the
 exposure you saw it on (the rootname is enough).
 
+## Requesting a feature
+
+Open an issue with the "Feature request" form. The package owner and maintainer prioritizes features that enable science
+and public outreach; the form has an optional field for that justification.
+
 ## Proposing a change
 
 1. Fork, branch, and make the change with a test that would have failed before it. Small synthetic datasets are
