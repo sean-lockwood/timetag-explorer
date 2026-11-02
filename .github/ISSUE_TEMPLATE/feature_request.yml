@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Thank you. The package owner and maintainer prioritizes features that enable science and public outreach.
-        Other requests are welcome too, but may wait longer.
+        Other requests are welcome too, but may take lower priority.
   - type: textarea
     id: feature
     attributes:
