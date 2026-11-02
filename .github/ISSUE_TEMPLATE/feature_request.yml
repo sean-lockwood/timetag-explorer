@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest a new capability or a change to what the code does.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. The package owner and maintainer prioritizes features that enable science and public outreach.
+        Other requests are welcome too, but may take lower priority.
+  - type: textarea
+    id: feature
+    attributes:
+      label: What would you like the code to do?
+      description: Describe the feature, and what you would do with it.
+    validations:
+      required: true
+  - type: textarea
+    id: justification
+    attributes:
+      label: Science or outreach justification (optional)
+      description: >-
+        Which science or public outreach goal would this enable? Leave this blank if the request does not support
+        either.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What do you do now?
+      description: Any workaround, or other approaches you considered.
+  - type: input
+    id: exposure
+    attributes:
+      label: Example exposure
+      description: The HST rootname (for example OFAP44G5Q), if a particular exposure would show the need.
