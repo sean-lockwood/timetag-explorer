@@ -1,5 +1,5 @@
-timetag-explorer
-================
+TIME-TAG Explorer v|release|
+============================
 
 The science code behind `TIME-TAG Explorer <https://explorer.planetarylightshow.com>`_, a web app for exploring
 HST/STIS FUV TIME-TAG observations (aurorae on Jupiter and Saturn, and other targets that move or vary).
