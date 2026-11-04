@@ -51,6 +51,28 @@ events by name (any case) or bit position, including selections written as expre
    t = Table.read('od8k57itq_tagsel.fits', hdu=1)
    keep = sel.in_time(t, 'orbit2') & sel.in_region(t, 'Oval') & t['EDGE_OK']
 
+Without a selection script
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The script is only a convenience: the same file can be made by calling the package. A selection needs just its numbers;
+a missing name becomes ``T1``, ``T2``, ... (``R1``, ``R2``, ... for regions), a missing bit the lowest free one, a missing
+color one from a default list, and it is visible. Name them, or give a ``bit``, when you want to find them again in a
+way that does not depend on their order::
+
+   from timetag_explorer import Corrections, Box
+   from timetag_explorer.selections import TimeRange, RegionSelection
+   from timetag_explorer.tagsel import make_tagsel
+
+   path = make_tagsel('od8k57itq',
+                      corr=Corrections(randcorr=True, flatcorr=False, timecorr=True),
+                      times=[TimeRange(start=0, stop=1500), TimeRange(name='orbit2', start=3000, stop=4500)],
+                      regions=[RegionSelection(region=Box(900, 1100, 900, 1100), frame='image')])    # hi-res pixels from 1
+
+The first range is ``T1`` (bit 0), the second ``orbit2`` (bit 1) and the region ``R1`` (bit 0 of ``SEL_REGION``).
+A selection made from others (``RegionSelection(name='both', expr='R1 | R2')``) must have a name. A region drawn on
+0-indexed arrays, as the Explorer draws them, goes through ``RegionSelection.from_array(region, frame)``, which moves it
+to the file's coordinates.
+
 Regions are in the file's coordinates, hi-res pixels counted from 1 like ``AXIS1``. Area and exposure are not stored:
 :func:`timetag_explorer.analysis.region_stats` and :func:`timetag_explorer.analysis.time_exposure` work them out when asked.
 

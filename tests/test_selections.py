@@ -98,10 +98,22 @@ assert sixteen.mask(np.array([2 ** 15], dtype=np.uint16), 15).tolist() == [True]
 # an explicit bit is kept, and the others fill the gaps
 gaps = TimeTable([TimeRange(name='a', start=0, stop=1, bit=3), TimeRange(name='b', start=2, stop=3), TimeRange(name='c', start=4, stop=5)])
 assert [r.bit for r in gaps] == [3, 0, 1]
+# a table needs only the numbers: names, bits, colors and visibility are filled in
+bare = TimeTable([TimeRange(start=0, stop=1), TimeRange(start=2, stop=3), TimeRange(start=4, stop=5)])
+assert bare.names == ('T1', 'T2', 'T3') and [r.bit for r in bare] == [0, 1, 2] and all(r.visible for r in bare)
+assert len({r.color for r in bare}) == 3 and all(len(r.color) == 7 and r.color[0] == '#' for r in bare)
+assert bare.row('t2').bit == 1 and bare.row(2).name == 'T3'
+# names already taken (any case) are skipped; unnamed rows are numbered in order
+skip = TimeTable([TimeRange(start=0, stop=1), TimeRange(name='t2', start=2, stop=3), TimeRange(start=4, stop=5)])
+assert skip.names == ('T1', 't2', 'T3')
+assert TimeTable([TimeRange(start=0, stop=1), TimeRange(name='all', expr='t1 | t1')]).names == ('T1', 'all')
+refused(lambda: TimeTable([TimeRange(start=0, stop=1), TimeRange(expr='t1')]), 'needs a name')
+assert RegionTable([RegionSelection(region=Box(1, 2, 1, 2), frame='image'),
+                    RegionSelection.from_array(Box(0, 1, 0, 1), 'rest')]).names == ('R1', 'R2')
 
 # ---- regions: coordinates, frames, tables ---------------------------------------------------------------------------
 drawn = Box(10.0, 20.0, 30.0, 40.0)                           # as the Explorer draws it: 0-indexed arrays
-sel = RegionSelection.from_array('oval', drawn, 'rest')
+sel = RegionSelection.from_array(drawn, 'rest', name='oval')
 assert sel.region == Box(11.0, 21.0, 31.0, 41.0) and sel.for_array() == drawn                # file coordinates are +1
 assert shift_region(Circle(5.0, 6.0, 2.0), 1.0) == Circle(6.0, 7.0, 2.0)
 assert shift_region(Polygon(((0.0, 0.0), (4.0, 0.0), (0.0, 4.0))), 1.0, 2.0).points == ((1.0, 2.0), (5.0, 2.0), (1.0, 6.0))
@@ -162,9 +174,9 @@ assert sel_all.time_exposure('orbit1', gti) == 1100.0
 # ---- exposure and area, when asked -------------------------------------------------------------------------------
 span = np.linspace(1, 2048, 400).round().astype(int)         # events across the detector, so the Explorer's bin grid covers it
 ds = dataset(np.linspace(0, 99, 400), span, span[::-1], gti=((0.0, 40.0), (50.0, 99.0)))
-whole = RegionTable([RegionSelection.from_array('big', Box(0.0, 2048.0, 0.0, 2048.0), 'image'),
-                     RegionSelection.from_array('mid', Box(400.0, 600.0, 400.0, 800.0), 'image'),
-                     RegionSelection.from_array('ring', Circle(1000.0, 1000.0, 100.0), 'image'),
+whole = RegionTable([RegionSelection.from_array(Box(0.0, 2048.0, 0.0, 2048.0), 'image', name='big'),
+                     RegionSelection.from_array(Box(400.0, 600.0, 400.0, 800.0), 'image', name='mid'),
+                     RegionSelection.from_array(Circle(1000.0, 1000.0, 100.0), 'image', name='ring'),
                      RegionSelection(name='rest', frame='rest', region=Box(1.0, 2.0, 1.0, 2.0)),
                      RegionSelection(name='mixed', expr='mid | rest'),
                      RegionSelection(name='midonly', expr='mid & big')])

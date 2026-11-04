@@ -10,6 +10,7 @@ draws on 0-indexed arrays, so `RegionSelection.from_array` shifts a drawn region
 """
 from __future__ import annotations
 
+import itertools
 import re
 import unicodedata
 from dataclasses import dataclass, replace
@@ -174,7 +175,7 @@ class _IntervalLogic:
 
 @dataclass(frozen=True, kw_only=True)
 class _Selection:
-    name: str
+    name: str = ''           # an expression needs one (other expressions refer to it); otherwise the table names it T1, R1, ...
     note: str = ''
     color: str = ''          # '#rrggbb'; filled in by the table when left empty
     visible: bool = True
@@ -212,7 +213,7 @@ class RegionSelection(_Selection):
     frame: str = ''
 
     @classmethod
-    def from_array(cls, name: str, region: Region, frame: str, **kwargs) -> 'RegionSelection':
+    def from_array(cls, region: Region, frame: str, *, name: str = '', **kwargs) -> 'RegionSelection':
         """A region as the Explorer draws it, on 0-indexed arrays, moved to the file's coordinates (+1)."""
         return cls(name=name, region=shift_region(region, 1.0), frame=frame, **kwargs)
 
@@ -262,17 +263,26 @@ def region_from_params(shape: str, params) -> Region:
 class SelectionTable:
     """Time ranges (`TimeTable`) or regions (`RegionTable`) in order, each with its bit, name and expression.
 
+    A selection needs only its numbers: a missing name becomes `T1`, `T2`, ... (`R1`, ... for regions; numbers already
+    taken by a name you gave are skipped), a missing bit the lowest free one, a missing color one from a default list.
     Selections are picked by name (any case) or by bit position: `table.row('Oval')`, `table.row(0)`. The bit is the
     position, 0 to 15, not the mask value 1, 2, 4, ...; a selection built from others has no bit and is picked by name.
     """
     kind = ''
     row_class = _Selection
+    prefix = ''              # the start of the names given to selections without one: T1, T2, ... or R1, R2, ...
 
     def __init__(self, rows=()):
         rows = list(rows)
         for row in rows:
             if not isinstance(row, self.row_class):
                 raise TypeError(f'a {self.kind} table holds {self.row_class.__name__} rows, not {type(row).__name__}')
+            if row.derived and not row.name:
+                raise ValueError(f'a {self.kind} selection made from an expression ({row.expr!r}) needs a name')
+        taken = {row.name.lower() for row in rows if row.name}
+        numbers = iter(n for n in itertools.count(1) if f'{self.prefix}{n}'.lower() not in taken)
+        rows = [row if row.name else replace(row, name=f'{self.prefix}{next(numbers)}') for row in rows]
+        for row in rows:
             if not NAME_PATTERN.fullmatch(row.name):
                 raise ValueError(f'{self.kind} name {row.name!r}: use a letter, then letters, digits or _')
             row.check()
@@ -409,6 +419,7 @@ class _Any:
 class TimeTable(SelectionTable):
     kind = 'time'
     row_class = TimeRange
+    prefix = 'T'
 
     def intervals(self, key) -> Intervals:
         """The set of time intervals (seconds since the exposure start) a time range covers."""
@@ -447,6 +458,7 @@ class TimeTable(SelectionTable):
 class RegionTable(SelectionTable):
     kind = 'region'
     row_class = RegionSelection
+    prefix = 'R'
 
     def frames(self, key) -> tuple:
         """The frames the selection is drawn in (one for a drawn region, several for an expression)."""
@@ -512,6 +524,6 @@ def single_selections(time_sel, region, frame, *, array_coordinates: bool = True
         if time_sel is not None else None
     if region is None:
         return times, None
-    selection = RegionSelection.from_array('R1', region, frame) if array_coordinates else \
+    selection = RegionSelection.from_array(region, frame, name='R1') if array_coordinates else \
         RegionSelection(name='R1', region=region, frame=frame)
     return times, RegionTable([selection])

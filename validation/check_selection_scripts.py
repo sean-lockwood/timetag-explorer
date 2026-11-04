@@ -186,10 +186,10 @@ def multi_tables(te, maker, frame, corr):
     times = te.TimeTable([te.TimeRange(name='T1', start=maker.time_sel[0], stop=maker.time_sel[1]),
                           te.TimeRange(name='late', start=maker.time_sel[1], stop=maker.late_sel, note='after T1', visible=False),
                           te.TimeRange(name='either', expr='t1 | LATE')])
-    rows = [te.RegionSelection.from_array('box_a', maker.region('box', frame, corr), frame, note='box'),
-            te.RegionSelection.from_array('circ_b', maker.region('circle', frame, corr), frame)]
+    rows = [te.RegionSelection.from_array(maker.region('box', frame, corr), frame, name='box_a', note='box'),
+            te.RegionSelection.from_array(maker.region('circle', frame, corr), frame, name='circ_b')]
     if frame != 'image':
-        rows.append(te.RegionSelection.from_array('img_c', maker.region('box', 'image', corr), 'image'))
+        rows.append(te.RegionSelection.from_array(maker.region('box', 'image', corr), 'image', name='img_c'))
     rows += [te.RegionSelection(name='a_not_b', expr='box_a - circ_b'), te.RegionSelection(name='a_and_b', expr='Box_A & circ_b')]
     return times, te.RegionTable(rows)
 

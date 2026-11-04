@@ -66,6 +66,13 @@ is a new `SHAPE` name with documented numbers; readers that do not know it can s
   re-applying a region from the table by hand to those columns gives the same flags.
 * Planet-map frames (`map_*`, in degrees) are **not supported yet**: a region drawn there makes the script stop.
 
+## Leaving things out
+
+In the package (not in the file, which always has every column) a selection needs only its numbers. A missing `NAME`
+becomes `T1`, `T2`, ... or `R1`, `R2`, ... in table order (numbers already taken by a given name are skipped); a missing
+bit becomes the lowest free one, around any bits given; a missing color comes from a default list; `VISIBLE` is true.
+A derived row must have a name, since other rows refer to it. Give names or bits when the order may change.
+
 ## Choosing a selection
 
 A time range or region is picked by its **`NAME`** (case-insensitive: `'Oval'` finds `oval`) or by its **bit position**

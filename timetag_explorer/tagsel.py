@@ -38,7 +38,9 @@ from astropy.io import fits
 from astropy.units import UnitsWarning
 
 from . import config
-from .constants import EDGE_TRIM, FLAT_URL, RANDOM_SEED, TIME_DECIMALS
+from .constants import EDGE_TRIM, FLAT_URL, RANDOM_SEED, SELECTION_SCRIPT_VERSION, TIME_DECIMALS
+
+PACKAGE_URL = 'https://github.com/sean-lockwood/timetag-explorer'    # the SELURL of a file made by calling the package directly
 from .dataset import TagDataset, _is_sorted, load_dataset
 from .frames import FRAMES, Corrections, frame_label, is_map, is_north, is_planet
 from .regions import region_source
@@ -363,9 +365,12 @@ def _as_table(table, table_class):
 
 
 @_quiet_unit_warning
-def make_tagsel(rootname: str, *, times=None, regions=None, corr: Corrections, script_version: str, tool_url: str,
-                north_up: bool = False, folder='.', overwrite: bool = False, log=print) -> Path:
+def make_tagsel(rootname: str, *, times=None, regions=None, corr: Corrections, script_version: str = SELECTION_SCRIPT_VERSION,
+                tool_url: str = PACKAGE_URL, north_up: bool = False, folder='.', overwrite: bool = False, log=print) -> Path:
     """Download what is missing, work out the columns and write `<rootname>_tagsel.fits` in `folder`. Returns its path.
+
+    Called directly (not from a generated script), only `rootname`, `corr` and the selections are needed: `script_version`
+    and `tool_url` default to this package's own, and every selection may leave out its name, bit, color and visibility.
 
     `times` and `regions` are the named selections (a `TimeTable` / `RegionTable`, or a list of `TimeRange` /
     `RegionSelection`), the regions in file coordinates (hi-res pixels counted from 1). Anything wrong with them, such as

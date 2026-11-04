@@ -201,7 +201,7 @@ slewing = FrameInfo(orientat=30.0, slew_angle=45.0, slew_rate=500.0)
 exp = dataset(t, xs, ys, weight=w); exp.frame_info = slewing; exp.aperture = 'F25SRF2'
 on = Corrections(randcorr=True, geocorr=False, flatcorr=True, timecorr=True)
 drawn = Box(900.0, 1300.0, 900.0, 1100.0)                              # as drawn on the Explorer's 0-indexed arrays
-box = RegionSelection.from_array('R1', drawn, 'image')                  # ... and in the file's coordinates (counted from 1)
+box = RegionSelection.from_array(drawn, 'image', name='R1')                  # ... and in the file's coordinates (counted from 1)
 one_time = TimeTable([TimeRange(name='T1', start=20.0, stop=60.0)])
 cols = tagsel.selection_columns(exp, one_time, RegionTable([box]), on)
 a = cols.arrays
@@ -521,3 +521,12 @@ try:
 except ValueError as err:
     assert 'maps are not supported' in str(err)
 print('selection script ok')
+
+# called directly, make_tagsel needs no script version or tool address
+import inspect
+from timetag_explorer import SELECTION_SCRIPT_VERSION
+from timetag_explorer.tagsel import PACKAGE_URL
+import timetag_explorer.tagsel as real_tagsel
+defaults = inspect.signature(real_tagsel.make_tagsel).parameters
+assert defaults['script_version'].default == SELECTION_SCRIPT_VERSION and defaults['tool_url'].default == PACKAGE_URL
+assert defaults['times'].default is None and defaults['corr'].default is inspect.Parameter.empty
