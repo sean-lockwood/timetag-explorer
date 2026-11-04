@@ -1,0 +1,42 @@
+# timetag-explorer
+
+> The science code behind TIME-TAG Explorer, a web app for exploring HST/STIS FUV TIME-TAG observations (aurorae on Jupiter and Saturn, and other targets that move or vary). A Python package (BSD-3-Clause) that reads a TIME-TAG file, applies the processing steps, transforms events into target and planet reference frames, builds light curves, count-rate images and exposure maps, and generates standalone "selection scripts".
+
+This repository holds only the calculations. The web server around it (sign-in, pages, plots, mouse selection) is a separate, private project and is not part of what you can read or change here. Access to the hosted app is by invitation; the app's front page says how to ask. Do not open issues here to request access.
+
+## Notes for agents
+
+- Install with `pip install timetag-explorer` (Python 3.11 or newer). Check the installed version against the changelog before relying on behavior; results can change between minor versions, and every such change is described in plain words there.
+- Input is a TIME-TAG file (`*_tag.fits`) from MAST. Rest frames and planet maps also need the exposure's `*_spt.fits` file next to it; planet frames ask JPL Horizons for positions (network access needed). The custom flat field (`combined_flat.fits`) is optional.
+- This is research software and its validation is incomplete. VALIDATION.md lists each step, its intended reference, its tests and whether a person has reviewed it. Tell users to check any result they plan to publish against their own analysis, and do not describe a step as reviewed unless that file says so.
+- Some features are marked experimental (planet maps, planet registration, vignetting, script generation). Some limits are stated in the README and changelog; for example, the geometric distortion correction is disabled while its coefficients are placeholders. Read them before advising on results.
+- The code was written with AI assistance (see "AI disclosure" in the README). Selection scripts are the supported way to reproduce a selection from the app: each one names the exact package version to install and writes a copy of the TIME-TAG file with added columns and `TTE*` header keywords that record what was done.
+- Unsure about a calculation? Name the step in VALIDATION.md and use the "Science question or concern" issue form instead of guessing.
+- To cite: use CITATION.cff ("Cite this repository" on GitHub).
+
+## Documentation
+
+- [README](https://raw.githubusercontent.com/sean-lockwood/timetag-explorer/main/README.md): what the package is, install, a first example, and which module does what
+- [Documentation (Read the Docs)](https://timetag-explorer.readthedocs.io): install, usage and API reference
+- [VALIDATION.md](https://raw.githubusercontent.com/sean-lockwood/timetag-explorer/main/VALIDATION.md): every processing step with its reference, tests and review status
+- [CHANGELOG.md](https://raw.githubusercontent.com/sean-lockwood/timetag-explorer/main/CHANGELOG.md): what changed in each version, including anything that can alter a computed number
+- [CONTRIBUTING.md](https://raw.githubusercontent.com/sean-lockwood/timetag-explorer/main/CONTRIBUTING.md): what belongs in this repository and how to raise a concern or request a feature
+
+## Code and packages
+
+- [GitHub repository](https://github.com/sean-lockwood/timetag-explorer): source, issues and pull requests
+- [PyPI package](https://pypi.org/project/timetag-explorer/): released versions
+- [Issues](https://github.com/sean-lockwood/timetag-explorer/issues): bug reports, science questions and concerns, and feature requests (the owner prioritizes features that enable science and public outreach)
+- [CITATION.cff](https://raw.githubusercontent.com/sean-lockwood/timetag-explorer/main/CITATION.cff): how to cite
+
+## The web app and its data
+
+- [TIME-TAG Explorer](https://explorer.planetarylightshow.com): the hosted app (sign-in by invitation)
+- [Access and about page](https://explorer.planetarylightshow.com/about): how to ask for access
+- [Combined flat field](https://www.planetarylightshow.com/static/data/combined_flat.fits): the optional flat-field file the code can use
+- [How the flat field was made](https://www.planetarylightshow.com/aurora_processing.html#Flat-Fielding): processing notes
+
+## Optional
+
+- [Tests](https://github.com/sean-lockwood/timetag-explorer/tree/main/tests): quick checks on synthetic data (no network)
+- [Real-data check](https://raw.githubusercontent.com/sean-lockwood/timetag-explorer/main/validation/check_selection_scripts.py): runs generated selection scripts on a real exposure; runs weekly on GitHub Actions
