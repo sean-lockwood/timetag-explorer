@@ -27,7 +27,7 @@ A column is written only if at least one selection of its kind exists.
 
 | Column | Type | Meaning |
 |---|---|---|
-| `NAME` | string | short unique identifier (`T1`, `orbit2`): letters, digits, `_`; used in expressions |
+| `NAME` | string | short identifier (`T1`, `orbit2`): starts with a letter, then letters, digits, `_`; unique ignoring case; used in expressions |
 | `NOTE` | string | the user's label, free text |
 | `BIT`, `MASK` | `I`, `J` | bit number and its value `2**BIT`; `-1` and `0` for a derived row |
 | `TSTART`, `TSTOP` | `D`, seconds | time range `TSTART <= TIME < TSTOP`, seconds since the exposure start (the `TIME` column); `NaN` for a derived row |
@@ -68,9 +68,15 @@ is a new `SHAPE` name with documented numbers; readers that do not know it can s
   The flag is the authority.
 * Planet-map frames (`map_*`, in degrees) are **not supported yet**: a region drawn there makes the script stop.
 
+## Choosing a selection
+
+A time range or region is picked by its **`NAME`** (case-insensitive: `'Oval'` finds `oval`) or by its **bit position**
+(`0`, `1`, `2`, ...; the bit number, not the mask value `1`, `2`, `4`, ...). A name never looks like a number, so the two
+cannot be confused. A derived row has no bit and can only be picked by name.
+
 ## Expressions
 
-`EXPR` combines `NAME`s of rows **above it** in the same table, so there are no cycles:
+`EXPR` combines `NAME`s (case-insensitive) of rows **above it** in the same table, so there are no cycles:
 
 | Operator | Meaning |
 |---|---|
@@ -100,28 +106,40 @@ The package will read the tables and hide the bit arithmetic:
 ```python
 sel = read_selections('od8k57itq_tagsel.fits')            # time ranges and regions, with their numbers and colors
 t = fits.getdata('od8k57itq_tagsel.fits', 1)
-keep = in_time(t, 'orbit2') & in_region(t, 'oval') & t['EDGE_OK']   # by NAME; derived names work too
+keep = in_time(t, 'orbit2') & in_region(t, 'Oval') & t['EDGE_OK']   # by NAME, any case; derived names work too
+keep = in_time(t, 1) & in_region(t, 0)                     # or by bit position (the same selections here)
 keep = (t['SEL_REGION'] & 0b101) != 0                      # or by hand: in the region with bit 0 or bit 2
 ```
 
-Example tables for one exposure:
+Example tables for one exposure. `TIMESEL`:
 
-| NAME | NOTE | BIT | SHAPE / TSTART..TSTOP / EXPR |
-|---|---|---|---|
-| `orbit1` | first orbit | 0 | 0 to 1500 s |
-| `orbit2` | second orbit | 1 | 3000 to 4500 s |
-| `oval` | main oval | 0 | `POLYGON` in `planet_north` |
-| `io` | Io footprint | 1 | `CIRCLE` in `rest` |
-| `outside` | oval without footprint | −1 | `oval - io` |
+| NAME | NOTE | BIT | TSTART | TSTOP | EXPR |
+|---|---|---|---|---|---|
+| `orbit1` | first orbit | 0 | 0 | 1500 | |
+| `orbit2` | second orbit | 1 | 3000 | 4500 | |
+| `both` | both orbits | −1 | NaN | NaN | `orbit1 \| orbit2` |
 
-"Brightness of the oval during orbit 2" is `in_time(t, 'orbit2') & in_region(t, 'oval')`. The file does not store such
+`REGSEL`:
+
+| NAME | NOTE | BIT | FRAME | SHAPE | EXPR |
+|---|---|---|---|---|---|
+| `oval` | main oval | 0 | `planet_north` | `POLYGON` | |
+| `io` | Io footprint | 1 | `rest` | `CIRCLE` | |
+| `outside` | oval without footprint | −1 | | | `oval - io` |
+
+(Other columns omitted.) "Brightness of the oval during orbit 2" is `in_time(t, 'orbit2') & in_region(t, 'oval')`. The file does not store such
 pairings; the analysis picks them. (A `SELECTIONS` table that names them could be added later without changing any of
 the above, for example to reload app state.)
 
+## Decided
+
+* `NAME` is the identifier; `NOTE` is the free label. Selections are picked by name or bit position (above).
+* 16 bits per column; a 32-bit word can follow later if needed.
+* Precedence as in Expressions.
+* **Map frames are left out for now**: a region drawn in a `map_*` frame makes the script stop. They will be added once
+  the user has to determine and state an accurate planet registration.
+
 ## Open points
 
-1. `NAME` is my addition so that expressions have something short and unique to refer to; `NOTE` is the free label.
-2. 16 bits per column. A 32-bit word would remove the limit for twice the storage.
-3. Map-frame regions (degrees) are left for a later version.
-4. Spatial regions carry no exposure or area. Exposure varies across a region and depends on the time range and the
+1. Spatial regions carry no exposure or area. Exposure varies across a region and depends on the time range and the
    corrections, so the package computes it on demand for a chosen pairing.
