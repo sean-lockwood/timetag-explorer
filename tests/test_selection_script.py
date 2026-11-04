@@ -13,10 +13,11 @@ import timetag_explorer as tte
 from timetag_explorer import selection_script, tagsel
 from timetag_explorer.constants import EDGE_TRIM, RANDOM_SEED
 from timetag_explorer.frames import Corrections, FrameInfo
-from timetag_explorer.regions import Box, Circle, Polygon
+from timetag_explorer.regions import Box, Circle, Polygon, shift_region
+from timetag_explorer.selections import RegionSelection, RegionTable, Selections, TimeRange, TimeTable, single_selections
 from timetag_explorer.transforms import frame_coordinates
 
-assert tte.SELECTION_SCRIPT_VERSION == '2.4'
+assert tte.SELECTION_SCRIPT_VERSION == '3.0'
 assert tuple(EDGE_TRIM) == (30, 6, 28, 6)
 
 n = 200
@@ -27,6 +28,7 @@ ds.aperture = 'F25SRF2'
 calls = []
 fake = types.ModuleType('timetag_explorer.tagsel')
 fake.make_tagsel = lambda *a, **k: calls.append((a, k)) or 'out.fits'
+fake.read_selections = lambda *a, **k: None      # (named in the script's imports; used only by its commented examples)
 
 
 def run_script(code, version=None):
@@ -47,43 +49,75 @@ def run_script(code, version=None):
 
 
 corr_all = Corrections(randcorr=True, geocorr=False, flatcorr=True, timecorr=True)
+
 cases = [((10.0, 20.0), None, 'image', OFF),
          (None, Box(500, 700, 600, 800), 'image', corr_all),
          ((10.0, 20.0), Circle(600, 700, 50), 'rest', corr_all),
          (None, Polygon(((500.0, 500.0), (700.0, 500.0), (600.0, 700.5))), 'rest_north', replace(corr_all, vigcorr=True))]
 for time_sel, region, frame, corr in cases:
-    s = tte.build_selection_script(ds, time_sel, region, frame, corr)
+    s = tte.build_selection_script(ds, time_sel, region, frame, corr)       # the Explorer's one window and one region
     assert not s.warnings, s.warnings
     assert s.filename == f'select_{ds.rootname}.py' and s.notes
     assert tte.SELECTION_SCRIPT_VERSION in s.code and f"SCRIPT_VERSION = '{tte.SELECTION_SCRIPT_VERSION}'" in s.code
     assert f"PACKAGE_VERSION = '{tte.__version__}'" in s.code and s.pip_command in s.code
     assert s.pip_command == f'pip install timetag-explorer=={tte.__version__}'      # (not an installed git copy here)
-    assert len(s.code.splitlines()) < 170, 'the script should stay short'           # the work is in the package
+    assert len(s.code.splitlines()) < 190, 'the script should stay short'           # the work is in the package
     calls.clear()
     run_script(s.code)
     (args, kwargs), = calls
     assert args == (ds.rootname,)
-    assert kwargs['time_sel'] == time_sel and kwargs['region'] == region
-    assert kwargs['frame'] == (frame if region is not None else 'image')
+    times, regions = single_selections(time_sel, region, frame)
+    assert list(kwargs['times']) == list(times or []) and list(kwargs['regions']) == list(regions or [])
+    if region is not None:     # drawn on 0-indexed arrays, written in the file's 1-indexed coordinates
+        assert kwargs['regions'][0].region == shift_region(region, 1.0) and kwargs['regions'][0].frame == frame
     got = kwargs['corr']
     assert (got.randcorr, got.geocorr, got.flatcorr, got.timecorr, got.vigcorr) == (
         corr.randcorr, corr.geocorr, corr.flatcorr, corr.timecorr, corr.vigcorr and ds.vignette_applies())
     assert got.vignette_ramps() == (corr.vignette_ramps() if corr.vigcorr else None)
     assert kwargs['script_version'] == tte.SELECTION_SCRIPT_VERSION and kwargs['tool_url'] == tte.selection_script.tool_url()
     assert kwargs['overwrite'] is False and kwargs['north_up'] is False and 'INCLUDE_NORTH_UP = False' in s.code
+    assert 'time_sel' not in kwargs and 'region' not in kwargs and 'frame' not in kwargs
     if region is not None:
-        assert region.describe() in s.code        # the region is written out in words, too
+        assert shift_region(region, 1.0).describe() in s.code        # in words, in the file's coordinates
 
-# A region drawn in the app holds numpy floats; the script must not need numpy to run its REGION line
+# any number of named selections: the table of selections, with derived ones, becomes the script's lists
+many_t = TimeTable([TimeRange(name='orbit1', start=0.0, stop=30.0, note='first orbit'),
+                    TimeRange(name='orbit2', start=50.0, stop=90.0, visible=False),
+                    TimeRange(name='both', expr='orbit1 | orbit2')])
+many_r = RegionTable([RegionSelection(name='oval', frame='rest', region=Polygon(((500.0, 500.0), (700.0, 500.0), (600.0, 700.5)))),
+                      RegionSelection(name='io', frame='image', region=Circle(600.0, 700.0, 50.0), note='Io, east'),
+                      RegionSelection(name='outside', expr='oval - io')])
+s = tte.build_selections_script(ds, corr_all, many_t, many_r)
+assert not s.warnings and len(s.code.splitlines()) < 190
+calls.clear(); run_script(s.code)
+(args, kwargs), = calls
+assert list(kwargs['times']) == list(many_t) and list(kwargs['regions']) == list(many_r)          # exactly the same rows
+assert [r.bit for r in TimeTable(kwargs['times'])] == [0, 1, -1] and [r.bit for r in RegionTable(kwargs['regions'])] == [0, 1, -1]
+for text in ("name='orbit1'", "name='orbit2'", "name='both', expr='orbit1 | orbit2'", 'visible=False', "note='Io, east'",
+             "name='outside', expr='oval - io'", 'bit=0', 'bit=1'):
+    assert text in s.code, text
+assert s.code.count('TimeRange(name=') == 3 and s.code.count('RegionSelection(name=') == 3
+assert 'from timetag_explorer.selections import RegionSelection, TimeRange' in s.code
+assert 'from timetag_explorer.regions import Circle, Polygon' in s.code
+assert 'one bit per time range or region' in ' '.join(s.notes) and 'read_selections' in ' '.join(s.notes)
+assert 'stops before it writes anything' in ' '.join(s.notes)
+nothing = tte.build_selections_script(ds, corr_all)
+assert 'TIMES = []' in nothing.code and 'REGIONS = []' in nothing.code and 'none (the corrections' in nothing.code
+
+# A region drawn in the app holds numpy floats; the script must not need numpy to run its REGIONS lines
 for drawn in (Box(*np.array([508.08, 819.27, 1192.6, 1452.37])), Circle(*np.array([600.5, 700.25, 50.125])),
               Polygon(tuple((np.float64(a), np.float64(b)) for a, b in ((500.5, 500.25), (700.0, 500.0), (600.0, 700.5))))):
     s = tte.build_selection_script(ds, None, drawn, 'image', OFF)
-    line = next(l for l in s.code.splitlines() if l.startswith('REGION = '))
-    assert 'np.' not in line and 'float64' not in s.code, line
+    assert 'np.' not in s.code.split('# ---- Example 1')[0] and 'float64' not in s.code
+    start = s.code.index('REGIONS = [')
+    block = s.code[start:s.code.index('\n]', start) + 2]
     names = {}
-    exec('from timetag_explorer.regions import Box, Circle, Polygon\n' + line, names)   # (no numpy imported)
-    assert names['REGION'] == drawn and all(type(v) is float for v in vars(names['REGION']).values() if not isinstance(v, tuple))
-    assert tagsel.region_source(drawn) in s.code
+    exec('from timetag_explorer.regions import Box, Circle, Polygon\nfrom timetag_explorer.selections import RegionSelection\n'
+         + block, names)                                                       # (no numpy imported)
+    (row,) = names['REGIONS']
+    assert row.region == shift_region(drawn, 1.0) and row.frame == 'image' and row.name == 'R1'
+    assert all(type(v) is float for v in vars(row.region).values() if not isinstance(v, tuple))
+    assert tagsel.region_source(shift_region(drawn, 1.0)) in s.code
 
 # vignetting is written only for an exposure it applies to
 other = dataset(np.linspace(0, 99, n), np.full(n, 600), np.full(n, 700)); other.aperture = '52X2'
@@ -104,9 +138,10 @@ assert len(calls) == 1
 
 # a region drawn on a planet map (experimental) is not carried over, and the script says so
 s = tte.build_selection_script(ds, (10.0, 20.0), Box(0, 10, 0, 10), 'map_rect', OFF)
-assert len(s.warnings) == 1 and 'map' in s.warnings[0]
+assert len(s.warnings) == 1 and 'map' in s.warnings[0] and 'not supported' in s.warnings[0]
 calls.clear(); run_script(s.code)
-assert calls[0][1]['region'] is None and calls[0][1]['time_sel'] == (10.0, 20.0)
+assert not calls[0][1]['regions'] and [r.name for r in calls[0][1]['times']] == ['T1'] and calls[0][1]['times'][0].start == 10.0
+
 
 # the instruction to install the package: a release from PyPI, or exactly the branch / commit / archive that is running
 class FakeDistribution:
@@ -154,6 +189,7 @@ dev = label_for(json.dumps({'url': 'file:///home/me/timetag-explorer', 'dir_info
 assert dev.startswith(f'{v} (dev') and dev.endswith(')'), dev            # (with ", branch @ hash" inside a git checkout)
 assert selection_script.pip_command('timetag-explorer @ https://x/y.zip') == 'pip install "timetag-explorer @ https://x/y.zip"'
 
+
 # ---- the columns ---------------------------------------------------------------------------------------------------
 # events along a row, some of them in the detector edge
 m = 400
@@ -164,30 +200,33 @@ w = np.linspace(0.5, 2.0, m)
 slewing = FrameInfo(orientat=30.0, slew_angle=45.0, slew_rate=500.0)
 exp = dataset(t, xs, ys, weight=w); exp.frame_info = slewing; exp.aperture = 'F25SRF2'
 on = Corrections(randcorr=True, geocorr=False, flatcorr=True, timecorr=True)
-cols = tagsel.selection_columns(exp, (20.0, 60.0), Box(900.0, 1300.0, 900.0, 1100.0), 'image', on)
+drawn = Box(900.0, 1300.0, 900.0, 1100.0)                              # as drawn on the Explorer's 0-indexed arrays
+box = RegionSelection.from_array('R1', drawn, 'image')                  # ... and in the file's coordinates (counted from 1)
+one_time = TimeTable([TimeRange(name='T1', start=20.0, stop=60.0)])
+cols = tagsel.selection_columns(exp, one_time, RegionTable([box]), on)
 a = cols.arrays
 assert list(a) == ['SEL_TIME', 'SEL_REGION', 'EDGE_OK', 'XCORR', 'YCORR', 'XREST', 'YREST', 'FLATW'], list(a)   # (no north-up, no WEIGHT)
-assert cols.flags == ('SEL_TIME', 'SEL_REGION', 'EDGE_OK')
+assert a['SEL_TIME'].dtype == np.uint16 and a['SEL_REGION'].dtype == np.uint16 and a['EDGE_OK'].dtype == bool
+assert cols.flags == ('SEL_TIME', 'SEL_REGION', 'EDGE_OK') and cols.times is one_time
 assert [name for name, _ in cols.skipped] == ['Planet rest frame'], cols.skipped      # (not a moon observation)
 # north-up columns only on request
-full = tagsel.selection_columns(exp, (20.0, 60.0), Box(900.0, 1300.0, 900.0, 1100.0), 'image', on, north_up=True)
+full = tagsel.selection_columns(exp, one_time, RegionTable([box]), on, north_up=True)
 assert list(full.arrays) == ['SEL_TIME', 'SEL_REGION', 'EDGE_OK', 'XCORR', 'YCORR', 'XREST', 'YREST', 'XRESTN', 'YRESTN',
                              'FLATW'], list(full.arrays)
 assert [name for name, _ in full.skipped] == ['Planet rest frame', 'Planet rest frame, north up'], full.skipped
 assert np.array_equal(full.arrays['XREST'], a['XREST'])
-# a region drawn in the rest frame builds that frame first, but the columns come out in the same order
-in_rest = tagsel.selection_columns(exp, (20.0, 60.0), Box(900.0, 1300.0, 900.0, 1100.0), 'rest', on, north_up=True)
-assert list(in_rest.arrays) == list(full.arrays), list(in_rest.arrays)
-assert np.array_equal(in_rest.arrays['XCORR'], a['XCORR']) and np.array_equal(in_rest.arrays['XREST'], a['XREST'])
 assert all(len(v) == m for v in a.values())
-# the time flag: the same events as the Explorer's time slice
+# the time flag: bit 0, the same events as the Explorer's time slice
 assert np.array_equal(np.flatnonzero(a['SEL_TIME']), np.arange(*exp.time_slice((20.0, 60.0)).indices(m)))
+assert set(np.unique(a['SEL_TIME'])) == {0, 1}
 # the corrected positions are the Explorer's own (jitter, same seed), counted from 1 like AXIS1 / AXIS2
 u, v = frame_coordinates(exp.x, exp.y, exp.time, exp.frame_info, 'image', on, seed=RANDOM_SEED)
 assert np.allclose(a['XCORR'], u + 1) and np.allclose(a['YCORR'], v + 1) and a['XCORR'].dtype == np.float32
 assert np.all(np.abs(a['XCORR'] - exp.x) <= 0.5 + 1e-4) and np.any(a['XCORR'] != exp.x)     # (a half-pixel jitter)
-# ... and the region is tested at those positions, event by event (not on bins)
-assert np.array_equal(a['SEL_REGION'], Box(900.0, 1300.0, 900.0, 1100.0).contains(u, v)) and a['SEL_REGION'].any() and not a['SEL_REGION'].all()
+# ... and the region (in file coordinates) is tested on the columns as written, event by event (not on bins), so applying
+# REGSEL to the position columns by hand gives the same flags
+inside = (a['SEL_REGION'] & 1) != 0
+assert np.array_equal(inside, box.region.contains(a['XCORR'], a['YCORR'])) and inside.any() and not inside.all()
 # the other frames start from the corrected positions
 ur, vr = frame_coordinates(exp.x, exp.y, exp.time, exp.frame_info, 'rest', on, seed=RANDOM_SEED)
 assert np.allclose(a['XREST'], ur + 1) and np.allclose(a['YREST'], vr + 1)
@@ -195,51 +234,86 @@ assert not np.allclose(a['XREST'], a['XCORR']) and not np.allclose(full.arrays['
 # edge trim and weights
 assert np.array_equal(a['EDGE_OK'], exp.valid_events(on)) and not a['EDGE_OK'].all() and a['EDGE_OK'].any()
 assert np.allclose(a['FLATW'], w) and 'WEIGHT' not in a
+assert any('SEL_TIME bit 0 (T1)' in line for line in cols.history) and any('SEL_REGION bit 0 (R1)' in line for line in cols.history)
 
-# a region drawn in the rest frame is tested in that frame
-box = Box(900.0, 1300.0, 900.0, 1100.0)
-cols = tagsel.selection_columns(exp, None, box, 'rest', on)
-assert np.array_equal(cols.arrays['SEL_REGION'], box.contains(ur, vr)) and 'SEL_TIME' not in cols.arrays
+# a region drawn in the rest frame is tested in that frame; its columns come out in the same order as any other
+in_rest = RegionSelection(name='R1', frame='rest', region=Box(1000.0, 1400.0, 900.0, 1100.0))
+cols = tagsel.selection_columns(exp, None, RegionTable([in_rest]), on)
+assert np.array_equal((cols.arrays['SEL_REGION'] & 1) != 0, in_rest.region.contains(cols.arrays['XREST'], cols.arrays['YREST']))
+assert (cols.arrays['SEL_REGION'] != 0).any() and 'SEL_TIME' not in cols.arrays
+assert list(cols.arrays) == ['SEL_REGION', 'EDGE_OK', 'XCORR', 'YCORR', 'XREST', 'YREST', 'FLATW'], list(cols.arrays)
+# a region in a north-up frame brings that frame's columns even without north_up (and only that frame's)
+north = RegionSelection(name='N', frame='rest_north', region=Box(1000.0, 1400.0, 900.0, 1100.0))
+cols = tagsel.selection_columns(exp, None, RegionTable([north]), on)
+assert list(cols.arrays) == ['SEL_REGION', 'EDGE_OK', 'XCORR', 'YCORR', 'XREST', 'YREST', 'XRESTN', 'YRESTN', 'FLATW'], list(cols.arrays)
+assert np.array_equal((cols.arrays['SEL_REGION'] & 1) != 0, north.region.contains(cols.arrays['XRESTN'], cols.arrays['YRESTN']))
 # a region in a frame that cannot be built is an error, not a missing column
 try:
-    tagsel.selection_columns(exp, None, box, 'planet', on)
+    tagsel.selection_columns(exp, None, RegionTable([RegionSelection(name='P', frame='planet', region=drawn)]), on)
     raise SystemExit('a region in an unavailable frame must be refused')
 except RuntimeError as err:
     assert 'cannot be built' in str(err)
 
+# several time ranges and regions: one bit each, in the frame each was drawn in; derived ones add no bit
+two_t = TimeTable([TimeRange(name='early', start=10.0, stop=40.0), TimeRange(name='late', start=30.0, stop=80.0),
+                   TimeRange(name='overlap', expr='early & late')])
+three_r = RegionTable([RegionSelection(name='oval', frame='image', region=box.region),
+                       RegionSelection(name='sea', frame='rest', region=in_rest.region),
+                       RegionSelection(name='either', expr='oval | sea'),
+                       RegionSelection(name='landonly', expr='oval - sea')])
+cols = tagsel.selection_columns(exp, two_t, three_r, on)
+b = cols.arrays
+assert list(b)[:2] == ['SEL_TIME', 'SEL_REGION'] and b['SEL_TIME'].dtype == np.uint16
+for name, lo, hi in (('early', 10.0, 40.0), ('late', 30.0, 80.0)):
+    assert np.array_equal(two_t.mask(b['SEL_TIME'], name), (exp.time >= lo) & (exp.time < hi)), name
+assert np.array_equal(two_t.mask(b['SEL_TIME'], 'overlap'), (exp.time >= 30.0) & (exp.time < 40.0))
+assert set(np.unique(b['SEL_TIME'])) == {0, 1, 2, 3} and set(np.unique(b['SEL_REGION'])) <= {0, 1, 2, 3}
+oval, sea = three_r.mask(b['SEL_REGION'], 'oval'), three_r.mask(b['SEL_REGION'], 'sea')
+assert np.array_equal(oval, box.region.contains(b['XCORR'], b['YCORR']))                 # bit 0, in the image frame
+assert np.array_equal(sea, in_rest.region.contains(b['XREST'], b['YREST']))              # bit 1, in the rest frame
+assert oval.any() and sea.any() and (oval & sea).any() and (oval & ~sea).any()          # they overlap, so bits are needed
+assert np.array_equal(three_r.mask(b['SEL_REGION'], 'either'), oval | sea)
+assert np.array_equal(three_r.mask(b['SEL_REGION'], 'landonly'), oval & ~sea)
+assert (b['SEL_REGION'] & 3 == 3).sum() == (oval & sea).sum()                            # both bits set where both hold
+assert [h for h in cols.history if 'SEL_REGION bit 1 (sea)' in h] and [h for h in cols.history if 'SEL_TIME bit 1 (late)' in h]
+
 # with every correction off there is no XCORR / YCORR, no weights, no edge flag; AXIS1 / AXIS2 are never rewritten
-cols = tagsel.selection_columns(exp, (20.0, 60.0), None, 'image', OFF)
+cols = tagsel.selection_columns(exp, one_time, None, OFF)
 assert list(cols.arrays) == ['SEL_TIME', 'XREST', 'YREST'], list(cols.arrays)
+# ... unless a region was drawn in the image frame: the columns it was tested on are written (here equal to AXIS1 / AXIS2)
+cols = tagsel.selection_columns(exp, None, RegionTable([box]), OFF)
+assert list(cols.arrays) == ['SEL_REGION', 'XCORR', 'YCORR', 'XREST', 'YREST'], list(cols.arrays)
+assert np.array_equal(cols.arrays['XCORR'], exp.x.astype(np.float32)) and np.array_equal(cols.arrays['YCORR'], exp.y.astype(np.float32))
 # geometric distortion alone also gives the corrected pair (the jitter is off, so it differs from AXIS only by the table)
-cols = tagsel.selection_columns(exp, None, None, 'image', replace(OFF, geocorr=True))
+cols = tagsel.selection_columns(exp, None, None, replace(OFF, geocorr=True))
 assert 'XCORR' in cols.arrays and np.allclose(cols.arrays['XCORR'], exp.x)                          # (zero offsets for now)
 # a rest frame with no slew is the image frame
-still = dataset(t, xs, ys); cols = tagsel.selection_columns(still, None, None, 'image', on)
+still = dataset(t, xs, ys); cols = tagsel.selection_columns(still, None, None, on)
 assert np.array_equal(cols.arrays['XREST'], cols.arrays['XCORR']) and np.array_equal(cols.arrays['YREST'], cols.arrays['YCORR'])
 
 # vignetting weights: F25SRF2 only, a separate column from FLATW (there is no combined WEIGHT)
 ys2 = np.full(m, 29)                                  # row 28: on the bottom ramp
 vig = replace(on, vigcorr=True, vigbot_start=128.0, vigbot_end=28.0, vigbot_loss=0.05)
 sens = dataset(t, xs, ys2, weight=w); sens.aperture = 'F25SRF2'
-cols = tagsel.selection_columns(sens, None, None, 'image', vig)
+cols = tagsel.selection_columns(sens, None, None, vig)
 assert np.allclose(cols.arrays['VIGW'], 1 / 0.95, rtol=1e-6) and 'WEIGHT' not in cols.arrays
 assert np.allclose(cols.arrays['FLATW'], w)
 sens.aperture = '52X0.2'
-cols = tagsel.selection_columns(sens, None, None, 'image', vig)
+cols = tagsel.selection_columns(sens, None, None, vig)
 assert 'VIGW' not in cols.arrays and 'WEIGHT' not in cols.arrays and np.allclose(cols.arrays['FLATW'], w)
 # no flat field: the switch is on but nothing can be written, and the reason is recorded
 noflat = dataset(t, xs, ys); noflat.flat_problem = 'Flat field not found'
-cols = tagsel.selection_columns(noflat, None, None, 'image', on)
+cols = tagsel.selection_columns(noflat, None, None, on)
 assert 'FLATW' not in cols.arrays and ('flat field', 'Flat field not found') in cols.skipped
 
-# ---- the commented examples: no combined weight, one flag per line, a light curve and a count-rate image --------------
+# ---- the commented examples: no combined weight, one line per selection, a light curve and a count-rate image -------
 class Cols(dict):
     """A stand-in for the astropy table the examples read: columns by name, a length."""
     def __len__(self):
         return len(self['TIME'])
 
 
-def run_example(code, number, **extra):
+def run_example(code, number, times_table=None, regions_table=None, **extra):
     """Run the commented example `number` (1 or 2) on arrays, with the file reads and the plotting replaced."""
     part = code.split(f'# ---- Example {number}')[1].split('# ---- Example')[0]
     lines = [line[2:] for line in part.splitlines()[1:] if line.startswith('# ')]
@@ -250,11 +324,12 @@ def run_example(code, number, **extra):
     nn = 4000
     gen = np.random.default_rng(1)
     time = np.sort(gen.uniform(0, 99, nn))
-    table = Cols(TIME=time, SEL_TIME=(time >= 10) & (time < 20), SEL_REGION=gen.random(nn) < 0.5, EDGE_OK=np.ones(nn, bool),
+    table = Cols(TIME=time, SEL_TIME=np.where((time >= 10) & (time < 20), 1, 0).astype(np.uint16),
+                 SEL_REGION=(gen.random(nn) < 0.5).astype(np.uint16), EDGE_OK=np.ones(nn, bool),
                  FLATW=np.full(nn, 2.0), VIGW=np.full(nn, 0.5), XCORR=gen.uniform(1, 2048, nn), YCORR=gen.uniform(1, 2048, nn))
     noop = lambda *args, **kwargs: None
     names = dict(np=np, OUTPUT='x', t=table, gti={'START': np.array([0.0, 50.0]), 'STOP': np.array([40.0, 99.0])},
-                 fits=types.SimpleNamespace(getheader=lambda f, h: {'SELTMIN': 10.0, 'SELTMAX': 20.0}),
+                 read_selections=lambda f: Selections(times_table or TimeTable(), regions_table or RegionTable()),
                  plt=types.SimpleNamespace(step=noop, xlabel=noop, ylabel=noop, show=noop, imshow=noop, colorbar=noop))
     exec(compile(body, f'example{number}', 'exec'), names)
     return names, table
@@ -263,61 +338,72 @@ def run_example(code, number, **extra):
 dsv = dataset(np.linspace(0, 99, n), np.full(n, 600), np.full(n, 700), weight=np.full(n, 1.25)); dsv.aperture = 'F25SRF2'
 s = tte.build_selection_script(dsv, (10.0, 20.0), Box(500, 700, 600, 800), 'image', replace(corr_all, vigcorr=True))
 code = s.code
-for flag in ('SEL_TIME', 'SEL_REGION', 'EDGE_OK'):
-    assert code.count(f"# keep &= t['{flag}']") == 2, flag                  # one line per criterion, in both examples
+assert code.count("# keep &= sel.in_time(t, 'T1')") == 2 and code.count("# keep &= sel.in_region(t, 'R1')") == 2
+assert code.count("# keep &= t['EDGE_OK']") == 2                                  # one line per criterion, in both examples
 assert code.count('# keep = np.ones(len(t), dtype=bool)') == 2
 assert code.count("# w *= t['FLATW']") == 2 and code.count("# w *= t['VIGW']") == 2 and 'WEIGHT' not in code
-assert code.count("hdr['SELTMIN']") == 2 and code.count('UnitsWarning') == 4
+assert 'SELTMIN' not in code and code.count('UnitsWarning') == 4
 assert code.index('Example 1') < code.index('Example 2') < code.index('np.histogram2d')     # the light curve comes first
-names, table = run_example(code, 1, **{'BIN = 3.0': 'BIN = 4.0'})
-keep = table['SEL_TIME'] & table['SEL_REGION']
+tt1, rr1 = single_selections((10.0, 20.0), Box(500, 700, 600, 800), 'image')
+names, table = run_example(code, 1, tt1, rr1, **{'BIN = 3.0': 'BIN = 4.0'})
+keep = (table['SEL_TIME'] != 0) & (table['SEL_REGION'] != 0)
 assert np.allclose(names['edges'], [10, 14, 18, 20]) and np.allclose(names['exposure'], [4, 4, 2])   # (inside the GTI)
 assert names['counts'].sum() == keep.sum()                                  # FLATW x VIGW = 2 x 0.5 = 1 per event
 assert np.allclose(names['rate'], names['counts'] / names['exposure'])
-names, table = run_example(code, 2)
+names, table = run_example(code, 2, tt1, rr1)
 assert names['exposure'] == 10.0 and abs(names['image'].sum() * names['exposure'] - keep.sum()) < 1e-6   # counts per second
 assert names['image'].shape == (1024, 1024)
-# no time selection: the whole exposure, and no header read
+# no time selection: the whole exposure
 s = tte.build_selection_script(ds, None, Box(500, 700, 600, 800), 'image', corr_all)
-assert "keep &= t['SEL_TIME']" not in s.code and 'SELTMIN' not in s.code.split('Example 1')[1]
-names, table = run_example(s.code, 2)
-assert names['exposure'] == 40.0 + 49.0 and names['t0'] == 0.0
+assert "sel.in_time" not in s.code and 'sel.times.window' not in s.code
+only_region = single_selections(None, Box(500, 700, 600, 800), 'image')[1]
+names, table = run_example(s.code, 2, None, only_region)
+assert names['exposure'] == 40.0 + 49.0
+names, table = run_example(s.code, 1, None, only_region)
+assert names['t0'] == 0.0 and names['t1'] == 99.0
 # with every correction off the examples use the recorded pixels and count each event once
 s = tte.build_selection_script(ds, (10.0, 20.0), None, 'image', OFF)
 assert "t['AXIS1']" in s.code and "w *=" not in s.code and 'w = np.ones(len(t))' in s.code
+# several selections: one line each, named as in the lists; the first time range gives the window
+s = tte.build_selections_script(dsv, corr_all, many_t, many_r)
+for name in ('orbit1', 'orbit2', 'both'):
+    assert s.code.count(f"# keep &= sel.in_time(t, '{name}')") == 2, name
+for name in ('oval', 'io', 'outside'):
+    assert s.code.count(f"# keep &= sel.in_region(t, '{name}')") == 2, name
+assert s.code.count("sel.times.window('orbit1')") == 1 and s.code.count("sel.time_exposure('orbit1', gti_rows)") == 1
 
 # ---- no selection: the corrections still apply, and the file has no selection columns --------------------------------
 s = tte.build_selection_script(ds, None, None, 'image', corr_all)
-assert not s.warnings and 'none (the corrections are still applied' in s.code and 'TIME_WINDOW = None' in s.code
+assert not s.warnings and 'none (the corrections are still applied' in s.code and 'TIMES = []' in s.code
 calls.clear(); run_script(s.code)
-assert calls[0][1]['time_sel'] is None and calls[0][1]['region'] is None and calls[0][1]['corr'].randcorr
-assert "# keep &= t['EDGE_OK']" in s.code and "keep &= t['SEL_TIME']" not in s.code     # the examples keep only the flags that exist
-assert 'SELTMIN' not in s.code and 'gti["STOP"].max()' in s.code                         # no time window to read from the header
-bare = tagsel.selection_columns(exp, None, None, 'image', on)
+assert not calls[0][1]['times'] and not calls[0][1]['regions'] and calls[0][1]['corr'].randcorr
+assert "# keep &= t['EDGE_OK']" in s.code and "sel.in_time" not in s.code and "sel.in_region" not in s.code   # only the flags that exist
+assert 'sel.times.window' not in s.code and 'gti_rows[:, 1].max()' in s.code                  # no time range to take a window from
+bare = tagsel.selection_columns(exp, None, None, on)
 assert list(bare.arrays)[:3] == ['EDGE_OK', 'XCORR', 'YCORR'] and bare.flags == ('EDGE_OK',)
 assert not {'SEL_TIME', 'SEL_REGION'} & set(bare.arrays)
-nothing = tagsel.selection_columns(exp, None, None, 'image', OFF)
+nothing = tagsel.selection_columns(exp, None, None, OFF)
 assert 'EDGE_OK' not in nothing.arrays and not nothing.flags and 'XCORR' not in nothing.arrays and 'XREST' in nothing.arrays
 
-# ---- the primary header: which steps ran, which selections were made ---------------------------------------------
-def header(time_sel, region, frame, corr, dsx=exp):
-    cols = tagsel.selection_columns(dsx, time_sel, region, frame, corr)
-    return {k: v for k, v, c in tagsel.primary_keywords(dsx, time_sel, region, frame, corr, cols, '2.0', 'https://x')}
+# ---- the primary header: which steps ran, whether time ranges and regions were selected ---------------------------------
+def header(times, regions, corr, dsx=exp):
+    cols = tagsel.selection_columns(dsx, times, regions, corr)
+    return {k: val for k, val, c in tagsel.primary_keywords(times or TimeTable(), regions or RegionTable(), corr, cols, '2.0', 'https://x')}
 
-h = header((20.0, 60.0), box, 'image', on)
+h = header(one_time, RegionTable([box]), on)
 assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['DONE', 'OMIT', 'DONE', 'OMIT', 'DONE'], h     # rand, geo, flat, vign, edge
 assert tagsel.STEP_KEYWORDS == ('TTERAND', 'TTEGEO', 'TTEFLAT', 'TTEVIGN', 'TTEEDGE')
 assert h['TTEFFILE'] == 'combined_flat.fits'                  # the flat file used (not PFLTFILE / LFLTFILE)
-assert h['TTETSEL'] is True and h['TTERSEL'] is True and (h['SELTMIN'], h['SELTMAX']) == (20.0, 60.0)
-assert h['SELREG'] == 'box' and h['SELFRAME'] == 'image' and h['RANDSEED'] == RANDOM_SEED
+assert h['TTETSEL'] is True and h['TTERSEL'] is True and h['RANDSEED'] == RANDOM_SEED
+assert not {'SELTMIN', 'SELTMAX', 'SELREG', 'SELFRAME'} & set(h)       # the TIMESEL and REGSEL tables hold the selections
 assert (h['SELEDGEL'], h['SELEDGER'], h['SELEDGEB'], h['SELEDGET']) == tuple(EDGE_TRIM)
 assert h['SELVER'] == '2.0' and h['TTEVER'] == tte.__version__ and h['SELURL'] == 'https://x' and 'VIGBSTRT' not in h
 # none of the calibration pipeline's keywords (stistools reads them) is written, and 'PERFORM' never appears
 pipeline = {'RANDCORR', 'GEOCORR', 'FLATCORR', 'VIGNCORR', 'EXPTCORR', 'TIMESEL', 'SPCSEL', 'PFLTFILE', 'LFLTFILE'}
 assert not pipeline & set(h) and 'PERFORM' not in h.values()
 # the flag keywords sit together, first, then the flat file, then the selections
-cols_ = tagsel.selection_columns(exp, (20.0, 60.0), box, 'image', on)
-cards = tagsel.primary_keywords(exp, (20.0, 60.0), box, 'image', on, cols_, '2.0', 'https://x')
+cols_ = tagsel.selection_columns(exp, one_time, RegionTable([box]), on)
+cards = tagsel.primary_keywords(one_time, RegionTable([box]), on, cols_, '2.0', 'https://x')
 names = [k for k, _, _ in cards]
 assert names[:8] == ['TTERAND', 'TTEGEO', 'TTEFLAT', 'TTEVIGN', 'TTEEDGE', 'TTEFFILE', 'TTETSEL', 'TTERSEL'], names
 assert names[-3:] == ['SELVER', 'TTEVER', 'SELURL'] and len(set(names)) == len(names)
@@ -326,18 +412,18 @@ assert not any('DONE or OMIT' in c for _, _, c in cards)     # (the value says i
 for key, value, comment in cards:
     width = 8 + 2 + (max(len(value), 8) + 2 if isinstance(value, str) else 20 if not isinstance(value, bool) else 20)
     assert width + (3 + len(comment) if comment else 0) <= 80 or isinstance(value, str) and len(value) > 40, (key, width, comment)
-h = header((20.0, 60.0), None, 'image', OFF)
-assert h['TTETSEL'] is True and h['TTERSEL'] is False and 'SELREG' not in h
+h = header(one_time, None, OFF)
+assert h['TTETSEL'] is True and h['TTERSEL'] is False
 assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['OMIT'] * 5 and 'RANDSEED' not in h and 'SELEDGEL' not in h and 'TTEFFILE' not in h
-h = header(None, None, 'image', replace(OFF, geocorr=True))
+h = header(None, None, replace(OFF, geocorr=True))
 assert h['TTETSEL'] is False and h['TTERSEL'] is False and h['TTEGEO'] == 'DONE' and h['TTERAND'] == 'OMIT'
 # a step is DONE only if it took effect: no flat found, or a vignetting model for another aperture
-h = header(None, None, 'image', on, noflat)
+h = header(None, None, on, noflat)
 assert h['TTEFLAT'] == 'OMIT' and 'TTEFFILE' not in h
 other_ap = dataset(t, xs, ys, weight=w); other_ap.aperture = '52X2'
-assert header(None, None, 'image', vig, other_ap)['TTEVIGN'] == 'OMIT'
+assert header(None, None, vig, other_ap)['TTEVIGN'] == 'OMIT'
 sens.aperture = 'F25SRF2'
-h = header(None, None, 'image', vig, sens)
+h = header(None, None, vig, sens)
 assert h['TTEVIGN'] == 'DONE' and (h['VIGBSTRT'], h['VIGBEND'], h['VIGBLOSS']) == (128.0, 28.0, 0.05)
 assert (h['VIGTSTRT'], h['VIGTEND'], h['VIGTLOSS']) == (1400.0, 2047.0, 0.23)
 assert all(len(k) <= 8 for k in h)                          # FITS keywords
@@ -347,6 +433,7 @@ assert all(len(k) <= 8 for k in h)                          # FITS keywords
 order = np.array([2, 0, 1])
 assert np.array_equal(tagsel.in_file_order(np.array([True, False, False]), order), np.array([False, False, True]))
 assert tagsel.in_file_order(np.array([1, 2]), None).tolist() == [1, 2]
+assert tagsel.in_file_order(np.array([4, 5, 6], dtype=np.uint16), order).dtype == np.uint16
 # The file keeps each column's coordinate keywords (TCTYPn, TCRPXn ...): astropy writes those from attributes of the
 # column, so a rebuilt column loses them unless they are passed on.
 made = []
@@ -361,9 +448,76 @@ try:
     assert made[0]['format'] == 'I' and made[0]['unit'] == 'pixel'
     made.clear()
     tagsel.column_definition('XCORR', np.zeros(3, np.float32)); tagsel.column_definition('EDGE_OK', np.ones(3, bool))
-    tagsel.column_definition('FLATW', np.ones(3, np.float32))
-    assert [(c['name'], c['format'], c.get('unit')) for c in made] == [
-        ('XCORR', 'E', 'pixel'), ('EDGE_OK', 'L', None), ('FLATW', 'E', None)], made
+    tagsel.column_definition('FLATW', np.ones(3, np.float32)); tagsel.column_definition('SEL_TIME', np.ones(3, np.uint16))
+    assert [(c['name'], c['format'], c.get('unit'), c.get('bzero')) for c in made] == [
+        ('XCORR', 'E', 'pixel', None), ('EDGE_OK', 'L', None, None), ('FLATW', 'E', None, None),
+        ('SEL_TIME', 'I', None, 32768)], made          # unsigned 16-bit: TZERO 32768
+    assert made[3]['array'].dtype == np.uint16
 finally:
     tagsel.fits = real_fits
+
+# the TIMESEL and REGSEL extensions: column formats, then written and read back through stand-ins for astropy's tables
+class FakeHeader(dict):
+    def add_comment(self, text): self.setdefault('COMMENT', []).append(text)
+
+
+class FakeTable:
+    def __init__(self, columns, name): self.columns, self.name, self.header = columns, name, FakeHeader()
+    @property
+    def data(self): return {c['name']: c['array'] for c in self.columns}
+
+
+class FakeList(list):
+    def __getitem__(self, key):
+        return next(h for h in self if h.name == key) if isinstance(key, str) else list.__getitem__(self, key)
+
+
+fake_fits = types.SimpleNamespace(Column=lambda **kw: kw, ColDefs=lambda cols: cols,
+                                  BinTableHDU=types.SimpleNamespace(from_columns=lambda cols, name: FakeTable(cols, name)))
+tagsel.fits = fake_fits
+try:
+    rhdu = tagsel.selection_table_hdu(three_r, 'REGSEL')
+    thdu = tagsel.selection_table_hdu(two_t, 'TIMESEL')
+    assert rhdu.name == 'REGSEL' and thdu.name == 'TIMESEL' and rhdu.header['EXTVER'][0] == 1
+    fmt = {c['name']: (c['format'], c.get('unit')) for c in rhdu.columns}
+    assert fmt['BIT'] == ('I', None) and fmt['MASK'] == ('J', None) and fmt['VISIBLE'] == ('L', None)
+    assert fmt['PARAMS'] == ('4D', 'pixel') and fmt['NAME'] == ('8A', None) and fmt['EXPR'] == ('10A', None), fmt   # (the longest text)
+    assert fmt['SHAPE'] == ('3A', None) and fmt['FRAME'] == ('5A', None) and fmt['COLOR'][0] == '7A'
+    tfmt = {c['name']: (c['format'], c.get('unit')) for c in thdu.columns}
+    assert tfmt['TSTART'] == ('D', 's') and tfmt['TSTOP'] == ('D', 's') and 'EXPTIME' not in tfmt
+    # an empty note still gets a width of 1 (a zero-width text column is not legal)
+    assert fmt['NOTE'][0] == '1A'
+finally:
+    tagsel.fits = real_fits
+
+
+def readable(hdu):
+    """A table as the reader sees it: names and data (the FakeTable columns, as astropy would hand them back)."""
+    return types.SimpleNamespace(name=hdu.name, columns=types.SimpleNamespace(names=[c['name'] for c in hdu.columns]),
+                                 data=hdu.data)
+
+
+class Opened:
+    def __init__(self, hdus): self.hdus = hdus
+    def __enter__(self): return FakeList(self.hdus)
+    def __exit__(self, *a): return False
+
+
+tagsel.fits = types.SimpleNamespace(open=lambda path: Opened([types.SimpleNamespace(name='PRIMARY'), readable(thdu), readable(rhdu)]))
+try:
+    read = tagsel.read_selections.__wrapped__      # (the unit-warning filter needs the real astropy, which is not here)
+    back = read('x_tagsel.fits')
+    assert back.times.rows == two_t.rows and back.regions.rows == three_r.rows, 'the tables must survive the file'
+    tagsel.fits = types.SimpleNamespace(open=lambda path: Opened([types.SimpleNamespace(name='PRIMARY')]))
+    empty = read('x_tagsel.fits')
+    assert not empty.times and not empty.regions
+finally:
+    tagsel.fits = real_fits
+# a map frame stops the script before anything is read or downloaded
+try:
+    tagsel.make_tagsel.__wrapped__('odtest01q', regions=[RegionSelection(name='m', frame='map_rect', region=drawn)], corr=OFF,
+                       script_version='3.0', tool_url='https://x')
+    raise SystemExit('a region on a planet map must stop the script')
+except ValueError as err:
+    assert 'maps are not supported' in str(err)
 print('selection script ok')

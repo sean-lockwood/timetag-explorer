@@ -2,6 +2,8 @@
 map), the exposure, and the frame and planet geometry in use."""
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from .constants import SPATIAL_BIN, TIME_CORR_MIN_FRACTION, TimeSel
@@ -9,6 +11,7 @@ from .dataset import TagDataset
 from .frames import ARCSEC_PER_LOWRES_PIXEL, Corrections, frame_label, is_map, is_planet
 from .planet import map_bin_area
 from .regions import Region
+from .selections import RegionTable, TimeTable
 from .transforms import counts_label
 
 
@@ -91,3 +94,54 @@ def describe_selection(ds: TagDataset, corr: Corrections, frame: str, time_sel: 
                      f'({counts_label(ds, corr)}/s)')
     return '\n'.join(lines)
 
+
+
+# ---- the numbers of a named selection, worked out when asked (they are not stored in the selection file) ----------------
+
+def time_exposure(ds: TagDataset, times: TimeTable, key) -> float:
+    """Good exposure time (s) inside a named time range (derived ones included): its overlap with the good-time intervals."""
+    return times.exposure(key, ds.gti)
+
+
+@dataclass(frozen=True)
+class RegionStats:
+    """What a named region covers. Exposure varies across a region (the field of view drifts in a rest frame, the detector
+    edge is trimmed), so it is given as a mean and a range over the region's bins, not as one number."""
+    frame: str
+    area: float            # hi-res pixel^2: the bins (4 x 4 hi-res pixels) whose centre is inside, as the Explorer counts
+    mean_exposure: float   # s, over those bins
+    min_exposure: float
+    max_exposure: float
+
+
+def region_stats(ds: TagDataset, regions: RegionTable, key, corr: Corrections, times: TimeTable | None = None,
+                 time_key=None) -> RegionStats:
+    """Area and exposure of a named region (derived ones included), optionally within a named time range.
+
+    The region is counted on the Explorer's bin grid in its frame, so a derived region must be made of regions drawn in
+    one frame (ValueError otherwise: bins of different frames do not line up). The exposure is the Explorer's own: with
+    the exposure-time correction on, the time each bin was on the detector; with it off, the good time of the window."""
+    frames = regions.frames(key)
+    if len(frames) != 1:
+        raise ValueError(f'region {regions.row(key).name!r} is made of regions in more than one frame '
+                         f'({", ".join(frames)}); its area and exposure need one frame')
+    frame = frames[0]
+    if frame != 'image':
+        ds.prepare_frame(frame)
+    inside = regions.evaluate(key, lambda row: ds.region_grid(row.for_array(), frame, corr))
+    if times is None:
+        windows, total = [None], ds.exposure()
+    else:
+        windows = [(float(a), float(b)) for a, b in times.intervals(time_key).rows]
+        total = times.exposure(time_key, ds.gti)
+    if corr.timecorr:
+        emap = np.zeros(inside.shape)
+        for window in windows:
+            emap = emap + ds.exposure_map(window, frame, corr)
+    else:
+        emap = np.full(inside.shape, total)
+    if not inside.any():
+        return RegionStats(frame, 0.0, float('nan'), float('nan'), float('nan'))
+    seen = emap[inside]
+    return RegionStats(frame, float(inside.sum()) * SPATIAL_BIN ** 2, float(seen.mean()), float(seen.min()),
+                       float(seen.max()))

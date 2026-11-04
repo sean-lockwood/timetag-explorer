@@ -22,7 +22,7 @@ Selection scripts
 
 :func:`timetag_explorer.build_selection_script` returns a standalone Python script that reproduces a selection on the
 original TIME-TAG file and writes a copy of it, ``<rootname>_tagsel.fits``, with columns added: the selection flags
-(``SEL_TIME``, ``SEL_REGION``, ``EDGE_OK``), the corrected image-frame position (``XCORR``, ``YCORR``) and the position
+(``SEL_TIME`` and ``SEL_REGION``, with one bit per named time range or region; ``EDGE_OK``), the corrected image-frame position (``XCORR``, ``YCORR``) and the position
 in each reference frame (``XREST``/``YREST`` and ``XPLAN``/``YPLAN``; the north-up versions ``XRESTN``/``YRESTN`` and
 ``XPLANN``/``YPLANN`` make the file much larger and are written only if the script sets ``INCLUDE_NORTH_UP = True``), and
 the weights (``FLATW``, ``VIGW``; an event counts as their product, and there is no combined column); ``AXIS1`` and
@@ -39,6 +39,21 @@ Explorer's 4-pixel bins. The version of the script generator,
 :data:`timetag_explorer.SELECTION_SCRIPT_VERSION`, is written into every script and into the ``SELVER`` keyword of the
 FITS files they write; it is raised whenever a generated script would compute or write something different.
 
+Several named selections
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+:func:`timetag_explorer.build_selections_script` takes any number of named time ranges and regions
+(:class:`~timetag_explorer.selections.TimeRange`, :class:`~timetag_explorer.selections.RegionSelection`; the format is in ``SELECTIONS.md``).
+The ``TIMESEL`` and ``REGSEL`` extensions of the output name the bits, and :func:`timetag_explorer.read_selections` picks
+events by name (any case) or bit position, including selections written as expressions of others::
+
+   sel = read_selections('od8k57itq_tagsel.fits')
+   t = Table.read('od8k57itq_tagsel.fits', hdu=1)
+   keep = sel.in_time(t, 'orbit2') & sel.in_region(t, 'Oval') & t['EDGE_OK']
+
+Regions are in the file's coordinates, hi-res pixels counted from 1 like ``AXIS1``. Area and exposure are not stored:
+:func:`timetag_explorer.analysis.region_stats` and :func:`timetag_explorer.analysis.time_exposure` work them out when asked.
+
 What is where
 -------------
 
@@ -53,7 +68,8 @@ Module                     Contents
 ``dataset``                ``TagDataset``: events, slicing in time, binning, light curves, count-rate images
 ``analysis``               areas, mean brightness and the exposure for a selection
 ``selection_script``       the generator of selection scripts (and its version, ``SELVER``)
-``tagsel``                 what a selection script runs: flags, corrected positions and weights in ``_tagsel.fits``
+``selections``             named time ranges and regions: bits, names, expressions, the ``TIMESEL`` / ``REGSEL`` rows
+``tagsel``                 what a selection script runs: flags, corrected positions, weights and selection tables in ``_tagsel.fits``
 ``gdcorr``                 the geometric distortion polynomial (placeholder coefficients for now)
 ``vignette``               the experimental vignetting model (F25SRF2 only; off by default)
 ``constants``, ``config``  shared numbers; file locations; logging

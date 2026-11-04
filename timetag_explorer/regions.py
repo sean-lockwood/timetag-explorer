@@ -3,7 +3,7 @@
 Coordinates are detector pixels (or, on a planet map, degrees)."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Union
 
 import numpy as np
@@ -76,3 +76,15 @@ def region_source(region: Region) -> str:
     if isinstance(region, Circle):
         return f'Circle(cx={f(region.cx)}, cy={f(region.cy)}, r={f(region.r)})'
     return 'Polygon(points=(' + ', '.join(f'({f(x)}, {f(y)})' for x, y in region.points) + ',))'
+
+
+def shift_region(region: Region, dx: float, dy: float | None = None) -> Region:
+    """The same shape moved by (dx, dy), which defaults to (dx, dx). Used to go between the two ways of counting pixels:
+    +1 from the 0-indexed arrays the Explorer draws on to the 1-indexed coordinates of AXIS1, XCORR and the other position
+    columns that a file records, -1 for the way back."""
+    dy = dx if dy is None else dy
+    if isinstance(region, Box):
+        return replace(region, x0=region.x0 + dx, x1=region.x1 + dx, y0=region.y0 + dy, y1=region.y1 + dy)
+    if isinstance(region, Circle):
+        return replace(region, cx=region.cx + dx, cy=region.cy + dy)
+    return replace(region, points=tuple((x + dx, y + dy) for x, y in region.points))

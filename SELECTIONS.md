@@ -1,6 +1,6 @@
 # Selections in the `_tagsel.fits` file
 
-**Status: proposal for review. Nothing here is implemented yet.** It replaces the single time window and single region
+**Status: implemented in package 1.7.0 (selection script 3.0), on the `multi-selection` branch until released.** It replaces the single time window and single region
 of selection script 2.x with any number of named time ranges and regions (selection script 3.0). Nobody depends on the
 2.x layout, so there is no compatibility mode.
 
@@ -32,7 +32,6 @@ A column is written only if at least one selection of its kind exists.
 | `BIT`, `MASK` | `I`, `J` | bit number and its value `2**BIT`; `-1` and `0` for a derived row |
 | `TSTART`, `TSTOP` | `D`, seconds | time range `TSTART <= TIME < TSTOP`, seconds since the exposure start (the `TIME` column); `NaN` for a derived row |
 | `EXPR` | string | derived rows only: expression over earlier rows; empty otherwise |
-| `EXPTIME` | `D`, seconds | good time (GTI) inside the range; derived, recomputable from the `GTI` extension |
 | `COLOR` | string | `#rrggbb`, the color in plots |
 | `VISIBLE` | `L` | shown in plots |
 
@@ -63,9 +62,8 @@ is a new `SHAPE` name with documented numbers; readers that do not know it can s
 * Regions use the **same 1-indexed hi-res pixel coordinates as the position columns** (`XCORR`, `XREST`, ...), so a
   region from the table can be applied by hand to those columns. The shift to 0-indexed arrays happens in one place in
   the package (the region is drawn at +1, plotted at −1, and one helper hands array-based code a 0-indexed copy).
-* The flag is computed in float64 at each event's own position, before the position is rounded to the float32 column.
-  Re-applying a region by hand to the float32 column can differ for the few events within about 1e-4 pixel of an edge.
-  The flag is the authority.
+* The flag is computed at each event's own position, on exactly the float32 values written to the position columns, so
+  re-applying a region from the table by hand to those columns gives the same flags.
 * Planet-map frames (`map_*`, in degrees) are **not supported yet**: a region drawn there makes the script stop.
 
 ## Choosing a selection
@@ -101,15 +99,20 @@ Combining across frames is exact, because each bit is already an event-level fla
 
 ## Using it
 
-The package will read the tables and hide the bit arithmetic:
+The package reads the tables and hides the bit arithmetic:
 
 ```python
 sel = read_selections('od8k57itq_tagsel.fits')            # time ranges and regions, with their numbers and colors
-t = fits.getdata('od8k57itq_tagsel.fits', 1)
-keep = in_time(t, 'orbit2') & in_region(t, 'Oval') & t['EDGE_OK']   # by NAME, any case; derived names work too
-keep = in_time(t, 1) & in_region(t, 0)                     # or by bit position (the same selections here)
+t = Table.read('od8k57itq_tagsel.fits', hdu=1)
+keep = sel.in_time(t, 'orbit2') & sel.in_region(t, 'Oval') & t['EDGE_OK']   # by NAME, any case; derived names work too
+keep = sel.in_time(t, 1) & sel.in_region(t, 0)             # or by bit position (the same selections here)
 keep = (t['SEL_REGION'] & 0b101) != 0                      # or by hand: in the region with bit 0 or bit 2
 ```
+
+Worked out when asked, not stored: `sel.time_exposure('orbit2', gti)` (good time inside the range),
+`analysis.time_exposure(ds, times, name)`, and `analysis.region_stats(ds, regions, name, corr, times, time_name)` (area
+on the Explorer's 4 x 4 pixel bins, and the mean, minimum and maximum exposure over them). A derived region must be made
+of regions in one frame for its area and exposure.
 
 Example tables for one exposure. `TIMESEL`:
 
@@ -133,13 +136,17 @@ the above, for example to reload app state.)
 
 ## Decided
 
-* `NAME` is the identifier; `NOTE` is the free label. Selections are picked by name or bit position (above).
+* `NAME` is the identifier; `NOTE` is the free label (ASCII; other characters become `?`). Selections are picked by name or bit position (above).
 * 16 bits per column; a 32-bit word can follow later if needed.
 * Precedence as in Expressions.
+* Area and exposure are worked out when asked, not stored (exposure varies across a region and depends on the time range).
+* A region's frame that cannot be built stops the script before anything is written; every frame a region uses gets its columns.
+* Color and visibility are stored, for reloading a session later.
 * **Map frames are left out for now**: a region drawn in a `map_*` frame makes the script stop. They will be added once
   the user has to determine and state an accurate planet registration.
 
-## Open points
+## Not yet
 
-1. Spatial regions carry no exposure or area. Exposure varies across a region and depends on the time range and the
-   corrections, so the package computes it on demand for a chosen pairing.
+* Reloading the Explorer's state from a file (the columns for it are there).
+* Map-frame regions (above).
+* More than 16 bits per column.

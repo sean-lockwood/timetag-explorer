@@ -51,9 +51,12 @@ TIME-TAG file; the planet ones also ask JPL Horizons for positions (through `ast
 or set the environment variables `TAG_EXPLORER_FLAT` and `TAG_EXPLORER_HORIZONS`.
 
 `build_selection_script(ds, time_sel, region, frame, corr)` returns a short Python script that reproduces a selection
-on the original TIME-TAG file and writes a copy of it (`<rootname>_tagsel.fits`) with columns added: selection flags,
-the corrected positions (`XCORR`, `YCORR`) and positions in each reference frame, and the weights. The script calls
-`timetag_explorer.tagsel.make_tagsel` and names the exact package version to install (see `CHANGELOG.md`).
+on the original TIME-TAG file and writes a copy of it (`<rootname>_tagsel.fits`) with columns added: bit flags for the
+selected time ranges and regions (`SEL_TIME`, `SEL_REGION`), the corrected positions (`XCORR`, `YCORR`) and positions in
+each reference frame, and the weights. `build_selections_script` takes any number of named time ranges and regions
+(see [SELECTIONS.md](https://github.com/sean-lockwood/timetag-explorer/blob/main/SELECTIONS.md)); `read_selections` reads
+them back, so events are picked by name or bit. The script calls `timetag_explorer.tagsel.make_tagsel` and names the exact
+package version to install (see `CHANGELOG.md`).
 
 ## What is where
 
@@ -66,8 +69,9 @@ the corrected positions (`XCORR`, `YCORR`) and positions in each reference frame
 | `transforms` | detector pixels to frames and maps, exposure-time maps, the distortion lookup table |
 | `dataset` | `TagDataset`: events, slicing in time, binning, light curves, count-rate images |
 | `analysis` | areas, mean brightness and the exposure for a selection |
+| `selections` | named time ranges and regions: bits, names, expressions (`oval - io`), the `TIMESEL` / `REGSEL` table rows |
 | `selection_script` | the generator of selection scripts (and its version, `SELVER`) |
-| `tagsel` | what a selection script runs: the flags, corrected positions and weights it writes into `_tagsel.fits` |
+| `tagsel` | what a selection script runs: the flags, corrected positions, weights and selection tables it writes into `_tagsel.fits` |
 | `gdcorr` | the geometric distortion polynomial (placeholder coefficients for now) |
 | `vignette` | the experimental vignetting model (two sensitivity ramps; F25SRF2 only; off by default) |
 | `constants`, `config`, `log` | shared numbers; file locations; logging |
