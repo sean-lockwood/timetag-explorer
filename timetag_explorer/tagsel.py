@@ -1,20 +1,25 @@
 """The work a selection script does: flag the selected events, add the corrected positions and weights, and write
 `<rootname>_tagsel.fits`.
 
-A script written by `build_selection_script` is only the choices (time window, region, frame, corrections) and a call
+A script written by `build_selection_script` is only the choices (named time ranges and regions, corrections) and a call
 to `make_tagsel`, so the numbers come from the same code as the Explorer's own images and light curves.
 
 The output is the exposure's TIME-TAG table with columns added; the columns that were there (AXIS1 and AXIS2 included)
 are not changed. Added columns, in time-tag row order:
 
-* flags (`L`): `SEL_TIME`, `SEL_REGION` and `EDGE_OK`, for the selections made and the corrections that are on;
+* flags: `SEL_TIME` and `SEL_REGION` (`I` with TZERO 32768, unsigned 16-bit): one bit per time range or region, set
+  where the event is inside it, as the `TIMESEL` and `REGSEL` tables say (SELECTIONS.md); `EDGE_OK` (`L`);
 * positions (`E`, float32, hi-res pixels counted from 1 like AXIS1 and AXIS2): `XCORR`, `YCORR` when the random
-  sub-pixel offset or the geometric distortion correction is on (the image-frame position with both applied), and one
-  pair per reference frame the exposure supports, from those corrected positions: `XREST`/`YREST` (target rest
-  frame) and `XPLAN`/`YPLAN` (planet rest frame, for moon observations). The north-up frames, `XRESTN`/`YRESTN` and
-  `XPLANN`/`YPLANN`, are written only with `north_up=True` (they make the file larger);
+  sub-pixel offset or the geometric distortion correction is on or a region was drawn in the image frame (the
+  image-frame position with both applied), and one pair per reference frame the exposure supports, from those corrected
+  positions: `XREST`/`YREST` (target rest frame) and `XPLAN`/`YPLAN` (planet rest frame, for moon observations). The
+  north-up frames, `XRESTN`/`YRESTN` and `XPLANN`/`YPLANN`, are written only with `north_up=True` or when a region was
+  drawn in one (they make the file larger);
 * weights (`E`): `FLATW` (flat field) and `VIGW` (vignetting model, F25SRF2 only), for the corrections that are on.
   An event's weight is their product; they are separate columns so either can be left out of a calculation.
+
+Regions are tested on exactly the values written to the position columns, so applying a region from `REGSEL` to those
+columns by hand gives the same flags.
 """
 from __future__ import annotations
 
@@ -33,10 +38,13 @@ from astropy.io import fits
 from astropy.units import UnitsWarning
 
 from . import config
-from .constants import EDGE_TRIM, FLAT_URL, RANDOM_SEED, TIME_DECIMALS, TimeSel
+from .constants import EDGE_TRIM, FLAT_URL, RANDOM_SEED, SELECTION_SCRIPT_VERSION, TIME_DECIMALS
+
+PACKAGE_URL = 'https://github.com/sean-lockwood/timetag-explorer'    # the SELURL of a file made by calling the package directly
 from .dataset import TagDataset, _is_sorted, load_dataset
 from .frames import FRAMES, Corrections, frame_label, is_map, is_north, is_planet
-from .regions import Region, region_source
+from .regions import region_source
+from .selections import RegionTable, Selections, TimeTable
 from .transforms import frame_coordinates, load_geo_lut
 
 # Columns of the positions in each reference frame (the image frame is XCORR / YCORR).
@@ -54,6 +62,8 @@ class TagselColumns:
     flags: tuple = ()                              # names of the flag columns
     skipped: list = field(default_factory=list)    # (what, reason)
     history: list = field(default_factory=list)    # lines for the FITS HISTORY
+    times: TimeTable = field(default_factory=TimeTable)         # the time ranges, as flagged in SEL_TIME
+    regions: RegionTable = field(default_factory=RegionTable)   # the regions, as flagged in SEL_REGION
 
 
 def _positions(ds: TagDataset, frame: str, corr: Corrections):
@@ -69,55 +79,67 @@ def _one_based(a: np.ndarray) -> np.ndarray:
     return a + np.float32(1.0)
 
 
-def selection_columns(ds: TagDataset, time_sel: TimeSel | None, region: Region | None, frame: str,
-                      corr: Corrections, north_up: bool = False) -> TagselColumns:
+def selection_columns(ds: TagDataset, times: TimeTable | None, regions: RegionTable | None, corr: Corrections,
+                      north_up: bool = False) -> TagselColumns:
     """Work out the columns a selection script adds (time order). Needs ephemerides (the network) only for planet
-    frames. A frame that cannot be built is skipped with its reason, unless the region was drawn in it. The north-up
-    frames' position columns are written only when `north_up` (a region drawn in one is still tested in it)."""
-    out = TagselColumns()
+    frames. A frame that cannot be built is skipped with its reason, unless a region was drawn in it: then this raises
+    (RuntimeError), so nothing is written. Every frame a region was drawn in gets its position columns, north-up or
+    not, so the region can be applied by hand; the other north-up frames only when `north_up`."""
+    times = times if times is not None else TimeTable()
+    regions = regions if regions is not None else RegionTable()
+    out = TagselColumns(times=times, regions=regions)
     flags, positions = {}, {}
     n = len(ds.time)
-    if time_sel is not None:
-        sel = np.zeros(n, dtype=bool)
-        sel[ds.time_slice(time_sel)] = True
-        flags['SEL_TIME'] = sel
-        out.history.append(f'SEL_TIME: True for {time_sel[0]:.{TIME_DECIMALS}f} <= TIME < {time_sel[1]:.{TIME_DECIMALS}f} s '
-                           '(seconds since the exposure start)')
+    if times:
+        bits = np.zeros(n, dtype=np.uint16)
+        for row in times.primitives:
+            bits[ds.time_slice((row.start, row.stop))] |= np.uint16(row.mask)
+            out.history.append(f'SEL_TIME bit {row.bit} ({row.name}): set for {row.start:.{TIME_DECIMALS}f} <= TIME < '
+                               f'{row.stop:.{TIME_DECIMALS}f} s (seconds since the exposure start)')
+        flags['SEL_TIME'] = bits
 
-    # Positions in every frame that can be built, one frame at a time (only the region's frame is kept for the test).
-    # The region's frame is built first, so a failure there is an error, not a gap.
+    # Positions in every frame that can be built, one frame at a time. The frames regions were drawn in come first:
+    # a failure there is an error, not a gap.
+    needed = regions.used_frames
+    region_bits = np.zeros(n, dtype=np.uint16) if regions else None
     corrected = bool(corr.randcorr or corr.geocorr)
-    todo = list(dict.fromkeys((['image'] if frame == 'image' else [frame] if region is not None else [])
-                              + ['image'] + list(POSITION_COLUMNS)))
+    todo = list(dict.fromkeys(list(needed) + ['image'] + list(POSITION_COLUMNS)))
     for f in todo:
         try:
             if f != 'image':
                 ds.prepare_frame(f)
             u, v = _positions(ds, f, corr)
         except Exception as exc:   # an unavailable frame (ValueError), or Horizons not reachable
-            if region is not None and f == frame:
-                raise RuntimeError(f'the region was drawn in the {frame_label(ds.frame_info, f)}, which cannot be '
+            if f in needed:
+                raise RuntimeError(f'a region was drawn in the {frame_label(ds.frame_info, f)}, which cannot be '
                                    f'built: {exc}') from exc
             if north_up or not is_north(f):
                 out.skipped.append((frame_label(ds.frame_info, f), str(exc)))
             continue
-        if region is not None and f == frame:
-            flags['SEL_REGION'] = np.asarray(region.contains(u, v), dtype=bool)
-            out.history.append(f'SEL_REGION: True for events inside this region of the {frame_label(ds.frame_info, f)}, '
-                               f'tested at each event\'s own position: {region.describe()}')
-            out.history.append('Region, unrounded: ' + region_source(region))
+        x1, y1 = _one_based(u), _one_based(v)    # what the position columns hold; the regions are tested on these
+        del u, v
+        for row in regions.primitives:
+            if row.frame == f:
+                region_bits[np.asarray(row.region.contains(x1, y1), dtype=bool)] |= np.uint16(row.mask)
+                out.history.append(f'SEL_REGION bit {row.bit} ({row.name}): set for events inside this region of the '
+                                   f'{frame_label(ds.frame_info, f)}, tested at each event\'s own position as written '
+                                   f'in the position columns: {row.region.describe()}')
+                out.history.append(f'Region {row.name}, unrounded: ' + region_source(row.region))
         if f == 'image':
-            if corrected:
-                positions['XCORR'], positions['YCORR'] = _one_based(u), _one_based(v)
+            if corrected or f in needed:
+                positions['XCORR'], positions['YCORR'] = x1, y1
                 what = ' and '.join(name for name, on in (('random sub-pixel offset', corr.randcorr),
                                                          ('geometric distortion', corr.geocorr)) if on)
-                out.history.append(f'XCORR, YCORR: the image-frame position with {what} applied')
-        elif north_up or not is_north(f):
+                out.history.append('XCORR, YCORR: the image-frame position' +
+                                   (f' with {what} applied' if what else ' (no correction applied)'))
+        elif north_up or not is_north(f) or f in needed:
             xname, yname = POSITION_COLUMNS[f]
-            positions[xname], positions[yname] = _one_based(u), _one_based(v)
+            positions[xname], positions[yname] = x1, y1
             out.history.append(f'{xname}, {yname}: the position in the {frame_label(ds.frame_info, f)}, from the '
                                'corrected positions')
-        del u, v
+        del x1, y1
+    if regions:
+        flags['SEL_REGION'] = region_bits
     # Always the same order (XCORR, YCORR, then the frames as listed in POSITION_COLUMNS), whichever frame was built first.
     order = ['XCORR', 'YCORR'] + [name for pair in POSITION_COLUMNS.values() for name in pair]
     positions = {name: positions[name] for name in order if name in positions}
@@ -198,6 +220,22 @@ def fetch_inputs(rootname: str, folder: Path, corr: Corrections, log=print) -> P
 
 # ---- writing the file -----------------------------------------------------------------------------------------------
 
+# STIS tables write the units 'seconds' and 'pixels', which the FITS standard does not list; astropy warns once per column
+UNIT_WARNING_PATTERN = r'.*did not parse as fits unit.*'
+
+
+def _quiet_unit_warning(function):
+    """Run `function` without astropy's warning that 'seconds' (the unit STIS writes for TIME) is not a FITS-standard
+    unit name. The FITS unit parser accepts only the standard names, so a custom unit cannot be enabled for it; the
+    warning is harmless (the values are read as written) and appears for every file."""
+    @functools.wraps(function)
+    def wrapper(*args, **kwargs):
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', category=UnitsWarning, message=UNIT_WARNING_PATTERN)
+            return function(*args, **kwargs)
+    return wrapper
+
+
 STRUCTURE_KEYWORD = re.compile(r'T(TYPE|FORM|UNIT|NULL|SCAL|ZERO|DISP|BCOL|DIM)\d+')   # astropy writes these afresh
 FITS_FORMATS = {'f8': 'D', 'f4': 'E', 'i2': 'I', 'i4': 'J', 'i8': 'K', 'u1': 'B', 'b1': 'L'}
 # Per-column coordinate keywords (TCTYPn, TCUNIn, TCRPXn, TCRVLn, TCDLTn, TRPOSn). astropy keeps these as attributes
@@ -231,11 +269,52 @@ def in_file_order(values: np.ndarray, order) -> np.ndarray:
 
 
 def column_definition(name: str, values: np.ndarray):
-    """A new column: a flag (L), or a float32 position (pixel) or weight (E)."""
+    """A new column: a bit-flag word (unsigned 16-bit, stored as `I` with TZERO 32768), a flag (L), or a float32
+    position (pixel) or weight (E)."""
+    if values.dtype == np.uint16:
+        return fits.Column(name=name, format='I', bzero=32768, array=values)
     if values.dtype == bool:
         return fits.Column(name=name, format='L', array=values)
     return fits.Column(name=name, format='E', array=values.astype(np.float32),
                        unit='pixel' if name[0] in 'XY' else None)
+
+
+TABLE_UNITS = {'TSTART': 's', 'TSTOP': 's', 'PARAMS': 'pixel'}
+TABLE_FORMATS = {'BIT': 'I', 'MASK': 'J', 'TSTART': 'D', 'TSTOP': 'D', 'VISIBLE': 'L'}
+
+
+def selection_table_hdu(table, extname: str):
+    """The `TIMESEL` or `REGSEL` extension for a table of selections (see SELECTIONS.md)."""
+    columns = []
+    for name, values in table.to_columns().items():
+        if name == 'PARAMS':
+            columns.append(fits.Column(name=name, format=f'{values.shape[1]}D', unit=TABLE_UNITS[name], array=values))
+        elif name in TABLE_FORMATS:
+            columns.append(fits.Column(name=name, format=TABLE_FORMATS[name], unit=TABLE_UNITS.get(name),
+                                       array=np.asarray(values)))
+        else:   # text
+            width = max([1] + [len(text) for text in values])
+            columns.append(fits.Column(name=name, format=f'{width}A', array=np.array(values, dtype=f'U{width}')))
+    hdu = fits.BinTableHDU.from_columns(fits.ColDefs(columns), name=extname)
+    hdu.header['EXTVER'] = (1, 'extension version')
+    hdu.header.add_comment('The selections that SEL_TIME / SEL_REGION flag, one bit each; see SELECTIONS.md in')
+    hdu.header.add_comment('https://github.com/sean-lockwood/timetag-explorer.')
+    hdu.header.add_comment('Times are seconds since the exposure start.' if extname == 'TIMESEL'
+                           else 'Positions are hi-res pixels counted from 1, like AXIS1.')
+    return hdu
+
+
+@_quiet_unit_warning
+def read_selections(path) -> Selections:
+    """The time ranges and regions recorded in a selection file (`TIMESEL` and `REGSEL`); an extension that is not there
+    gives an empty table. Use `.in_time(t, name_or_bit)` and `.in_region(t, name_or_bit)` on the events table."""
+    def columns(hdu):
+        return {name: np.array(hdu.data[name]) for name in hdu.columns.names}
+    with fits.open(path) as hdul:
+        names = [hdu.name for hdu in hdul]
+        times = TimeTable.from_columns(columns(hdul['TIMESEL'])) if 'TIMESEL' in names else TimeTable()
+        regions = RegionTable.from_columns(columns(hdul['REGSEL'])) if 'REGSEL' in names else RegionTable()
+    return Selections(times, regions)
 
 
 # The primary-header keywords are this tool's own (prefix TTE), never the calibration pipeline's step keywords
@@ -244,12 +323,13 @@ STEP_KEYWORDS = ('TTERAND', 'TTEGEO', 'TTEFLAT', 'TTEVIGN', 'TTEEDGE')   # DONE 
 KEYWORD_GROUP = 'TIMETAG-EXPLORER KEYWORDS'                                # the label above the block, `/ TIMETAG-EXPLORER KEYWORDS`
 
 
-def primary_keywords(ds: TagDataset, time_sel: TimeSel | None, region: Region | None, frame: str, corr: Corrections,
-                     columns: TagselColumns, script_version: str, tool_url: str) -> list:
+def primary_keywords(times: TimeTable, regions: RegionTable, corr: Corrections, columns: TagselColumns,
+                     script_version: str, tool_url: str) -> list:
     """(keyword, value, comment) for the primary header, in the order they are written as one block: which steps were
-    done (DONE or OMIT), the flat file used, which selections were made, and the numbers and versions behind them. A
-    step is DONE only when it took effect (the flat field must have been found, the vignetting model must apply to
-    this aperture); otherwise OMIT. Needs no FITS library."""
+    done (DONE or OMIT), the flat file used, whether time ranges and regions were selected (the TIMESEL and REGSEL
+    extensions hold them), and the numbers and versions behind them. A step is DONE only when it took effect (the flat
+    field must have been found, the vignetting model must apply to this aperture); otherwise OMIT. Needs no FITS
+    library."""
     from . import __version__
     done = {'TTERAND': bool(corr.randcorr), 'TTEGEO': bool(corr.geocorr), 'TTEFLAT': 'FLATW' in columns.arrays,
             'TTEVIGN': 'VIGW' in columns.arrays, 'TTEEDGE': 'EDGE_OK' in columns.arrays}
@@ -259,13 +339,8 @@ def primary_keywords(ds: TagDataset, time_sel: TimeSel | None, region: Region | 
     keys = [(key, 'DONE' if done[key] else 'OMIT', what[key]) for key in STEP_KEYWORDS]
     if done['TTEFLAT']:
         keys.append(('TTEFFILE', config.FLAT_FILE.name, 'flat-field file used for FLATW'))
-    keys += [('TTETSEL', time_sel is not None, 'a time selection was made (SEL_TIME)'),
-             ('TTERSEL', region is not None, 'a region was selected (SEL_REGION)')]
-    if time_sel is not None:
-        keys += [('SELTMIN', float(time_sel[0]), '[s] SEL_TIME window start'),
-                 ('SELTMAX', float(time_sel[1]), '[s] SEL_TIME window end')]
-    if region is not None:
-        keys += [('SELREG', region.kind, 'SEL_REGION shape'), ('SELFRAME', frame, 'SEL_REGION reference frame')]
+    keys += [('TTETSEL', bool(times), 'time ranges selected: SEL_TIME, TIMESEL'),
+             ('TTERSEL', bool(regions), 'regions selected: SEL_REGION, REGSEL')]
     if done['TTERAND']:
         keys.append(('RANDSEED', RANDOM_SEED, 'seed of the random sub-pixel offsets'))
     if done['TTEVIGN']:
@@ -285,36 +360,26 @@ def primary_keywords(ds: TagDataset, time_sel: TimeSel | None, region: Region | 
     return keys
 
 
-# STIS tables write the units 'seconds' and 'pixels', which the FITS standard does not list; astropy warns once per column
-UNIT_WARNING_PATTERN = r'.*did not parse as fits unit.*'
-
-
-def _quiet_unit_warning(function):
-    """Run `function` without astropy's warning that 'seconds' (the unit STIS writes for TIME) is not a FITS-standard
-    unit name. The FITS unit parser accepts only the standard names, so a custom unit cannot be enabled for it; the
-    warning is harmless (the values are read as written) and appears for every file."""
-    @functools.wraps(function)
-    def wrapper(*args, **kwargs):
-        with warnings.catch_warnings():
-            warnings.filterwarnings('ignore', category=UnitsWarning, message=UNIT_WARNING_PATTERN)
-            return function(*args, **kwargs)
-    return wrapper
+def _as_table(table, table_class):
+    return table if isinstance(table, table_class) else table_class(table or ())
 
 
 @_quiet_unit_warning
-def make_tagsel(rootname: str, *, time_sel: TimeSel | None = None, region: Region | None = None,
-                frame: str = 'image', corr: Corrections, script_version: str, tool_url: str,
-                north_up: bool = False, folder='.', overwrite: bool = False, log=print) -> Path:
+def make_tagsel(rootname: str, *, times=None, regions=None, corr: Corrections, script_version: str = SELECTION_SCRIPT_VERSION,
+                tool_url: str = PACKAGE_URL, north_up: bool = False, folder='.', overwrite: bool = False, log=print) -> Path:
     """Download what is missing, work out the columns and write `<rootname>_tagsel.fits` in `folder`. Returns its path.
 
-    Refuses to replace an existing output unless `overwrite`. Needs a network connection for files that are not in
-    `folder` yet (MAST, the flat field) and, for planet frames, for JPL Horizons.
+    Called directly (not from a generated script), only `rootname`, `corr` and the selections are needed: `script_version`
+    and `tool_url` default to this package's own, and every selection may leave out its name, bit, color and visibility.
+
+    `times` and `regions` are the named selections (a `TimeTable` / `RegionTable`, or a list of `TimeRange` /
+    `RegionSelection`), the regions in file coordinates (hi-res pixels counted from 1). Anything wrong with them, such as
+    a region on a planet map (not supported), stops the script here, before anything is downloaded or written; so does a
+    region whose frame cannot be built. Refuses to replace an existing output unless `overwrite`. Needs a network
+    connection for files that are not in `folder` yet (MAST, the flat field) and, for planet frames, for JPL Horizons.
     """
     from . import __version__
-    if is_map(frame):
-        raise ValueError('regions drawn on a planet map are not supported (maps are experimental)')
-    if frame not in FRAMES:
-        raise ValueError(f'unknown reference frame {frame!r}')
+    times, regions = _as_table(times, TimeTable), _as_table(regions, RegionTable)   # (checks them)
     folder = Path(folder).resolve()
     folder.mkdir(parents=True, exist_ok=True)
     if not os.environ.get('TAG_EXPLORER_FLAT'):
@@ -329,15 +394,16 @@ def make_tagsel(rootname: str, *, time_sel: TimeSel | None = None, region: Regio
 
     log(f'Reading {tag_path.name} ...')
     ds = load_dataset(tag_path)
-    columns = selection_columns(ds, time_sel, region, frame, corr, north_up)
+    columns = selection_columns(ds, times, regions, corr, north_up)
     for what, why in columns.skipped:
         log(f'  left out: {what} ({why})')
     log(f'{len(ds.time):,} events')
-    for name in columns.flags:
-        log(f'  {name:<12}{int(columns.arrays[name].sum()):>12,}')
-    if len(columns.flags) > 1:
-        both = np.logical_and.reduce([columns.arrays[name] for name in columns.flags])
-        log(f'  {"all of them":<12}{int(both.sum()):>12,}')
+    for row in times.primitives:
+        log(f'  time    {row.name:<12}{int(np.count_nonzero(columns.arrays["SEL_TIME"] & np.uint16(row.mask))):>12,}')
+    for row in regions.primitives:
+        log(f'  region  {row.name:<12}{int(np.count_nonzero(columns.arrays["SEL_REGION"] & np.uint16(row.mask))):>12,}')
+    if 'EDGE_OK' in columns.arrays:
+        log(f'  EDGE_OK {"":<12}{int(columns.arrays["EDGE_OK"].sum()):>12,}')
 
     history = [f'Columns added by the TIME-TAG Explorer selection script v{script_version} (timetag-explorer {__version__}), '
                f'run {datetime.now(timezone.utc):%Y-%m-%d} UTC',
@@ -346,7 +412,8 @@ def make_tagsel(rootname: str, *, time_sel: TimeSel | None = None, region: Regio
                'Existing columns keep their values (AXIS1 and AXIS2 are the recorded integer pixels)']
     history += columns.history
     history.append('Positions are hi-res pixels counted from 1, like AXIS1 and AXIS2; float32')
-    history.append('Which steps were performed, the selections made and the versions are keywords of the primary header')
+    history.append('Which steps were performed and the versions are keywords of the primary header; the time ranges and '
+                   'regions are the TIMESEL and REGSEL extensions')
 
     with fits.open(tag_path) as hdul:
         raw_time = np.asarray(hdul[1].data['TIME'], dtype=np.float32)
@@ -367,7 +434,7 @@ def make_tagsel(rootname: str, *, time_sel: TimeSel | None = None, region: Regio
         # astropy puts an ordinary keyword before any trailing blank cards, and the label is a blank-keyword card, so
         # without it each keyword would land above the label. The calibration pipeline's own keywords are left exactly
         # as they were.
-        keywords = primary_keywords(ds, time_sel, region, frame, corr, columns, script_version, tool_url)
+        keywords = primary_keywords(times, regions, corr, columns, script_version, tool_url)
         for key, _, _ in keywords:
             if key in primary:
                 del primary[key]
@@ -377,6 +444,10 @@ def make_tagsel(rootname: str, *, time_sel: TimeSel | None = None, region: Regio
         primary.add_history('Columns added to extension 1; see its HISTORY. The processing steps, the flat file and '
                             f'the selections are the {KEYWORD_GROUP.lower()} (TTE...) of this header.')
         hdul[1] = table
+        if times:
+            hdul.append(selection_table_hdu(times, 'TIMESEL'))
+        if regions:
+            hdul.append(selection_table_hdu(regions, 'REGSEL'))
         part = output.with_name(output.name + '.part')   # written aside, so a failure never leaves a broken output
         try:
             hdul.writeto(part, overwrite=True)

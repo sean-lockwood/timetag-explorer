@@ -55,6 +55,8 @@ Analysis
 Selection scripts
 -----------------
 
+.. automodule:: timetag_explorer.selections
+
 .. automodule:: timetag_explorer.selection_script
 
 .. automodule:: timetag_explorer.tagsel

@@ -2,10 +2,12 @@
 """Run the selection scripts the TIME-TAG Explorer generates, and check what they write.
 
 For one exposure this builds a script for each combination of switches, reference frame, region tool and selection
-(time, space or both), runs each one in a fresh folder with the real astropy (the scripts call this checkout's
-`timetag_explorer.tagsel`), and compares the columns each writes with the Explorer's own numbers, event by event: the
-flags, the corrected positions (XCORR, YCORR and one pair per reference frame) and the weights. It also checks that the
-TAG file's own columns and tables come through unchanged, and the header keywords and HISTORY.
+(time, space or both, none, or "multi": several named time ranges and regions with derived ones), runs each one in a
+fresh folder with the real astropy (the scripts call this checkout's `timetag_explorer.tagsel`), and compares the
+columns each writes with the Explorer's own numbers, event by event: the bit flags (SEL_TIME, SEL_REGION, stored as
+unsigned 16-bit), the corrected positions (XCORR, YCORR and one pair per reference frame) and the weights. It also checks
+that the TIMESEL and REGSEL tables read back as written, that the TAG file's own columns and tables come through
+unchanged, and the header keywords and HISTORY.
 
 The data are downloaded once and shared by every run:
   * the first script is run in the empty data folder, so it downloads the TAG file, the SPT file and the flat field
@@ -48,7 +50,7 @@ HST_S3_BUCKET, HST_S3_PREFIX = 'stpubdata', 'hst/public'    # the public HST arc
 PIXEL_FRAMES = ('image', 'rest', 'rest_north')
 PLANET_FRAMES = ('planet', 'planet_north')
 SHAPES = ('box', 'circle', 'polygon')
-SELECTIONS = ('time', 'space', 'both', 'none')
+SELECTIONS = ('time', 'space', 'both', 'none', 'multi')
 # (randcorr, geocorr, flatcorr, timecorr): "quick" is everything on and everything off, "all" is every combination
 SWITCH_SETS = {
     'quick': [(True, True, True, True), (False, False, False, False)],
@@ -105,15 +107,18 @@ def ensure_files(rootname, folder):
 def make_cases(frames, shapes, selections, switches):
     """(frame, shape, selection, (rand, geo, flat, edge)) for every distinct script.
 
-    A time-only (or no-selection) script does not depend on the frame or the shape, so it is listed once, as 'image'."""
+    A time-only (or no-selection) script does not depend on the frame or the shape, so it is listed once, as 'image'.
+    The multi-selection script uses a box and a circle in the frame itself, so it has no shape of its own."""
     cases = []
     for sw in switches:
         if 'time' in selections:
             cases.append(('image', None, 'time', sw))
         if 'none' in selections:       # no selection: the corrections alone
             cases.append(('image', None, 'none', sw))
-        for frame, shape, selection in itertools.product(frames, shapes, [s for s in selections if s not in ('time', 'none')]):
+        for frame, shape, selection in itertools.product(frames, shapes, [s for s in selections if s not in ('time', 'none', 'multi')]):
             cases.append((frame, shape, selection, sw))
+        if 'multi' in selections:
+            cases.extend((frame, None, 'multi', sw) for frame in frames)
     return cases
 
 
@@ -130,6 +135,7 @@ class RegionMaker:
         self.te, self.ds, self._uv = te, ds, {}
         lo, hi = np.percentile(ds.time, [20, 60])
         self.time_sel = (round(float(lo), te.TIME_DECIMALS), round(float(hi), te.TIME_DECIMALS))
+        self.late_sel = round(float(np.percentile(ds.time, 85)), te.TIME_DECIMALS)      # the "multi" case's second range ends here
 
     def uv(self, frame, corr):
         """A thinned sample of the events' coordinates in this frame, from the app's own grid."""
@@ -174,30 +180,44 @@ def to_file_order(flag, order):
     return out
 
 
-def reference_columns(te, ds, order, case, time_sel, region, north_up=False):
+def multi_tables(te, maker, frame, corr):
+    """The tables of the "multi" case: two time ranges and a derived one; a box and a circle in the frame, a box in the image
+    frame (when that is another frame) and two derived regions. Regions are as the Explorer draws them (0-indexed arrays)."""
+    times = te.TimeTable([te.TimeRange(name='T1', start=maker.time_sel[0], stop=maker.time_sel[1]),
+                          te.TimeRange(name='late', start=maker.time_sel[1], stop=maker.late_sel, note='after T1', visible=False),
+                          te.TimeRange(name='either', expr='t1 | LATE')])
+    rows = [te.RegionSelection.from_array(maker.region('box', frame, corr), frame, name='box_a', note='box'),
+            te.RegionSelection.from_array(maker.region('circle', frame, corr), frame, name='circ_b')]
+    if frame != 'image':
+        rows.append(te.RegionSelection.from_array(maker.region('box', 'image', corr), 'image', name='img_c'))
+    rows += [te.RegionSelection(name='a_not_b', expr='box_a - circ_b'), te.RegionSelection(name='a_and_b', expr='Box_A & circ_b')]
+    return times, te.RegionTable(rows)
+
+
+def reference_columns(te, ds, order, case, times, regions, north_up=False):
     """The columns the script should write (in the file's row order), from the Explorer's own functions, in the order
-    they are written: flags, then positions, then weights. The north-up frames' columns are left out unless
-    `north_up` (the scripts' INCLUDE_NORTH_UP, off by default); there is no combined WEIGHT column."""
+    they are written: flags, then positions, then weights. The north-up frames' columns are left out unless `north_up`
+    (the scripts' INCLUDE_NORTH_UP, off by default) or a region was drawn in one; there is no combined WEIGHT column.
+    Regions are in the file's coordinates and tested on the position columns as written (float32, counted from 1)."""
     frame, shape, selection, (rand, geo, flat, edge) = case
     corr = te.Corrections(randcorr=rand, geocorr=geo, flatcorr=flat, timecorr=edge)
     flags, positions, weights = {}, {}, {}
-    if time_sel is not None:
-        lo, hi = np.searchsorted(ds.time, time_sel)
-        m = np.zeros(len(ds.time), dtype=bool)
-        m[lo:hi] = True
-        flags['SEL_TIME'] = m
+    if times:
+        bits = np.zeros(len(ds.time), dtype=np.uint16)
+        for row in times.primitives:
+            lo, hi = np.searchsorted(ds.time, (row.start, row.stop))
+            bits[lo:hi] |= np.uint16(1 << row.bit)
+        flags['SEL_TIME'] = bits
     geo_lut = te.load_geo_lut() if geo else None
     xy = lambda f: te.frame_coordinates(ds.x, ds.y, ds.time, ds.frame_info, f, corr, seed=te.RANDOM_SEED,
                                         geo_lut=geo_lut, track=ds.planet_track() if f in PLANET_FRAMES else None)
-    if region is not None:
-        flags['SEL_REGION'] = np.asarray(region.contains(*xy(frame)), dtype=bool)   # at each event's own position
+    used = regions.used_frames if regions else ()
+    region_bits = np.zeros(len(ds.time), dtype=np.uint16) if regions else None
     valid = ds.valid_events(corr)
-    if valid is not None:
-        flags['EDGE_OK'] = np.array(valid, dtype=bool)
     for f, names in (('image', ('XCORR', 'YCORR')),) + tuple(te.POSITION_COLUMNS.items()):
-        if f == 'image' and not (rand or geo):
+        if f == 'image' and not (rand or geo or f in used):
             continue
-        if f.endswith('_north') and not north_up:
+        if f.endswith('_north') and not (north_up or f in used):
             continue
         try:
             if f != 'image':
@@ -205,14 +225,25 @@ def reference_columns(te, ds, order, case, time_sel, region, north_up=False):
         except ValueError:
             continue          # a frame this exposure does not have: no columns
         u, v = xy(f)
-        positions[names[0]], positions[names[1]] = u + np.float32(1.0), v + np.float32(1.0)
+        x1, y1 = u + np.float32(1.0), v + np.float32(1.0)
+        positions[names[0]], positions[names[1]] = x1, y1
+        for row in regions.primitives if regions else ():
+            if row.frame == f:
+                region_bits[np.asarray(row.region.contains(x1, y1), dtype=bool)] |= np.uint16(1 << row.bit)   # each event's own position
+    if regions:
+        flags['SEL_REGION'] = region_bits
+    if valid is not None:
+        flags['EDGE_OK'] = np.array(valid, dtype=bool)
     flat_w = ds.weight if flat and ds.weight is not None else None
     gain = ds.vignette_gain(corr)
     if flat_w is not None:
         weights['FLATW'] = np.asarray(flat_w, dtype=np.float32)
     if gain is not None:
         weights['VIGW'] = gain
-    return {name: to_file_order(values, order) for name, values in {**flags, **positions, **weights}.items()}
+    ordered = {name: flags[name] for name in ('SEL_TIME', 'SEL_REGION', 'EDGE_OK') if name in flags}
+    ordered.update({name: positions[name] for name in ('XCORR', 'YCORR', 'XREST', 'YREST', 'XRESTN', 'YRESTN',
+                                                       'XPLAN', 'YPLAN', 'XPLANN', 'YPLANN') if name in positions})
+    return {name: to_file_order(values, order) for name, values in {**ordered, **weights}.items()}
 
 
 # ---- running and checking one script -----------------------------------------------------------------------------
@@ -261,7 +292,7 @@ def same_value(a, b):
     return a == b
 
 
-def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
+def check_output(te, fits, case, times, regions, expected, tag_path, folder, rootname):
     """Problems found in the script's output file (an empty list means it is right)."""
     frame, shape, selection, (rand, geo, flat, edge) = case
     problems = []
@@ -278,8 +309,9 @@ def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
             new.verify('exception')
         except Exception as exc:   # astropy raises its own VerifyError
             problems.append(f'FITS verify: {exc}')
-        if len(new) != len(old) or [h.name for h in new] != [h.name for h in old]:
-            return problems + [f'extensions differ: {[h.name for h in old]} -> {[h.name for h in new]}']
+        wanted = [h.name for h in old] + (['TIMESEL'] if times else []) + (['REGSEL'] if regions else [])
+        if [h.name for h in new] != wanted:
+            return problems + [f'extensions {[h.name for h in new]}, expected {wanted}']
         old_names = list(old[1].columns.names)
         want = old_names + list(expected)
         got = list(new[1].columns.names)
@@ -296,6 +328,23 @@ def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
                 if not same(values, ref):
                     differing = int(np.count_nonzero(values != ref)) if values.shape == ref.shape else -1
                     problems.append(f'{name}: {differing} of {len(ref):,} events differ from the Explorer')
+        for name in ('SEL_TIME', 'SEL_REGION'):   # bit flags: unsigned 16-bit, which FITS stores as signed with TZERO 32768
+            if name in got:
+                n = got.index(name) + 1
+                head = new[1].header
+                if np.asarray(new[1].data[name]).dtype != np.uint16 or head.get(f'TFORM{n}') != 'I' or head.get(f'TZERO{n}') != 32768:
+                    problems.append(f'{name} is not unsigned 16-bit: dtype {np.asarray(new[1].data[name]).dtype}, '
+                                    f'TFORM {head.get(f"TFORM{n}")!r}, TZERO {head.get(f"TZERO{n}")!r}')
+        for table, rows, label in ((times, 'TIMESEL', 'time ranges'), (regions, 'REGSEL', 'regions')):   # the tables read back as given
+            if table:
+                try:
+                    back = getattr(te.read_selections(out_path), 'times' if label == 'time ranges' else 'regions')
+                    if back.rows != table.rows:
+                        first = next((a, b) for a, b in zip(back.rows, table.rows) if a != b) if len(back.rows) == len(table.rows) \
+                            else (len(back.rows), len(table.rows))
+                        problems.append(f'{rows} differs from the {label} the script was given: {str(first)[:300]}')
+                except Exception as exc:
+                    problems.append(f'{rows} could not be read back: {exc!r}')
         for i in range(2, len(old)):   # other tables (good-time intervals ...) are carried over untouched
             if getattr(old[i].data, 'names', None):
                 for name in old[i].columns.names:
@@ -317,10 +366,11 @@ def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
         checks += [(bool(block) and block[0] == 'TTERAND', f'the "{label}" label card, then TTERAND first (got {block[:1]})'),
                    (not {'TIMESEL', 'SPCSEL'} & set(header), 'TIMESEL / SPCSEL must not be written'),
                    ((header.get('TTEFFILE') == 'combined_flat.fits') == done['TTEFLAT'], f'TTEFFILE {header.get("TTEFFILE")!r}')]
-        checks += [(header.get('TTETSEL') is (selection in ('time', 'both')), f'TTETSEL {header.get("TTETSEL")!r}'),
-                   (header.get('TTERSEL') is (region is not None), f'TTERSEL {header.get("TTERSEL")!r}'),
-                   (('SEL_TIME' in expected) == (selection in ('time', 'both')), 'SEL_TIME column presence'),
-                   (('SEL_REGION' in expected) == (region is not None), 'SEL_REGION column presence'),
+        checks += [(header.get('TTETSEL') is bool(times), f'TTETSEL {header.get("TTETSEL")!r}'),
+                   (header.get('TTERSEL') is bool(regions), f'TTERSEL {header.get("TTERSEL")!r}'),
+                   (not {'SELTMIN', 'SELTMAX', 'SELREG', 'SELFRAME'} & set(header), 'SELTMIN / SELTMAX / SELREG / SELFRAME must not be written'),
+                   (('SEL_TIME' in expected) == bool(times), 'SEL_TIME column presence'),
+                   (('SEL_REGION' in expected) == bool(regions), 'SEL_REGION column presence'),
                    (header.get('SELVER') == te.SELECTION_SCRIPT_VERSION, f'SELVER {header.get("SELVER")!r}'),
                    (header.get('TTEVER') == te.__version__, f'TTEVER {header.get("TTEVER")!r}'),
                    (host in str(header.get('SELURL', '')), f'SELURL {header.get("SELURL")!r}'),
@@ -329,8 +379,6 @@ def check_output(te, fits, case, region, expected, tag_path, folder, rootname):
         if done['TTEEDGE']:
             checks += [(header.get(key) == pixels, f'{key} {header.get(key)!r}, expected {pixels}')
                        for key, pixels in zip(('SELEDGEL', 'SELEDGER', 'SELEDGEB', 'SELEDGET'), te.EDGE_TRIM)]
-        if region is not None:
-            checks.append((header.get('SELFRAME') == frame, f'SELFRAME {header.get("SELFRAME")!r}'))
         for ok, text in checks:
             if not ok:
                 problems.append('header: ' + text)
@@ -408,10 +456,13 @@ def main(argv=None):
     from timetag_explorer import constants, dataset as tte_dataset
     from astropy.io import fits
 
-    from timetag_explorer import tagsel, transforms
+    from timetag_explorer import selections, tagsel, transforms
     te = types.SimpleNamespace(
         Box=tte.Box, Circle=tte.Circle, Polygon=tte.Polygon, Corrections=tte.Corrections, FrameInfo=tte.FrameInfo,
         TagDataset=tte.TagDataset, build_selection_script=tte.build_selection_script, __version__=tte.__version__,
+        build_selections_script=tte.build_selections_script, read_selections=tte.read_selections,
+        TimeRange=tte.TimeRange, TimeTable=tte.TimeTable, RegionSelection=tte.RegionSelection, RegionTable=tte.RegionTable,
+        single_selections=selections.single_selections,
         SELECTION_SCRIPT_VERSION=tte.SELECTION_SCRIPT_VERSION, TIME_DECIMALS=constants.TIME_DECIMALS,
         EDGE_TRIM=constants.EDGE_TRIM, tool_url=tte.selection_script.tool_url, RANDOM_SEED=constants.RANDOM_SEED,
         POSITION_COLUMNS=tagsel.POSITION_COLUMNS, frame_coordinates=transforms.frame_coordinates,
@@ -492,14 +543,19 @@ def main(argv=None):
             skipped.append((case, available[frame]))
             continue
         corr = te.Corrections(randcorr=rand, geocorr=geo, flatcorr=flat, timecorr=edge)
-        region = None if selection in ('time', 'none') else maker.region(shape, frame, corr)
-        time_sel = maker.time_sel if selection in ('time', 'both') else None
         try:
-            s = te.build_selection_script(ds, time_sel, region, frame, corr)
+            if selection == 'multi':     # several named selections, with derived ones
+                times, regions = multi_tables(te, maker, frame, corr)
+                s = te.build_selections_script(ds, corr, times, regions)
+            else:                        # the Explorer's one window and one region, as the app asks for the script
+                time_sel = maker.time_sel if selection in ('time', 'both') else None
+                region = None if selection in ('time', 'none') else maker.region(shape, frame, corr)
+                s = te.build_selection_script(ds, time_sel, region, frame, corr)
+                times, regions = te.single_selections(time_sel, region, frame)
         except Exception as exc:
             results.append((case_name(case), 'FAIL', 0.0, f'the Explorer could not build the script: {exc!r}'))
             continue
-        jobs.append((case, region, time_sel, s))
+        jobs.append((case, times or te.TimeTable(), regions or te.RegionTable(), s))
     for case, why in skipped:
         results.append((case_name(case), 'SKIP', 0.0, why))
     print(f'running {len(jobs)} scripts, {args.jobs} at a time ...')
@@ -508,14 +564,14 @@ def main(argv=None):
     shutil.rmtree(runs, ignore_errors=True)
 
     def run_one(job):
-        case, region, time_sel, s = job
+        case, times, regions, s = job
         folder = runs / case_name(case).replace('/', '_')
         return job, folder, *run_script(s.code, s.filename, tag_path, folder, args.timeout, shared)
 
     with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
         for future in as_completed([pool.submit(run_one, j) for j in jobs]):
             try:
-                (case, region, time_sel, s), folder, proc, secs = future.result()
+                (case, times, regions, s), folder, proc, secs = future.result()
             except subprocess.TimeoutExpired as exc:
                 results.append(('(timeout)', 'FAIL', float(args.timeout), str(exc)))
                 continue
@@ -523,23 +579,29 @@ def main(argv=None):
             if proc.returncode != 0:
                 problems = ['script exited with an error: ' + (proc.stderr.strip().splitlines() or ['?'])[-1]]
             else:
-                expected = reference_columns(te, ds, order, case, time_sel, region)
+                expected = reference_columns(te, ds, order, case, times, regions)
                 try:
-                    problems = check_output(te, fits, case, region, expected, tag_path, folder, rootname)
+                    problems = check_output(te, fits, case, times, regions, expected, tag_path, folder, rootname)
                 except Exception as exc:
                     problems = [f'could not check the output: {exc!r}']
-                if not problems and 'SEL_REGION' in expected:
-                    n = int(expected['SEL_REGION'].sum())
-                    if n == 0 or n == len(ds.time):   # a region with nothing, or everything, in it proves little
-                        problems.append(f'weak test: the region holds {n:,} events')
-                    else:   # the Explorer's binned highlight differs from the exact test only near the region's edge
-                        corr = te.Corrections(randcorr=case[3][0], geocorr=case[3][1], flatcorr=case[3][2],
-                                              timecorr=case[3][3])
-                        binned = to_file_order(ds.region_mask(region, case[0], corr), order)
-                        apart = int(np.count_nonzero(binned != expected['SEL_REGION']))
-                        if apart > 0.10 * max(n, 1):
-                            problems.append(f'the exact region test and the Explorer\'s binned one differ for {apart:,} '
-                                            f'of {n:,} selected events: more than an edge effect')
+                if not problems and regions:
+                    corr = te.Corrections(randcorr=case[3][0], geocorr=case[3][1], flatcorr=case[3][2], timecorr=case[3][3])
+                    flag = expected['SEL_REGION']
+                    for row in regions.primitives:
+                        inside = (flag & np.uint16(row.mask)) != 0
+                        n = int(inside.sum())
+                        if n == 0 or n == len(ds.time):   # a region with nothing, or everything, in it proves little
+                            problems.append(f'weak test: region {row.name} holds {n:,} events')
+                        else:   # the Explorer's binned highlight differs from the exact test only near the region's edge
+                            binned = to_file_order(ds.region_mask(row.for_array(), row.frame, corr), order)
+                            apart = int(np.count_nonzero(binned != inside))
+                            if apart > 0.10 * max(n, 1):
+                                problems.append(f'the exact test and the Explorer\'s binned one differ for region {row.name} in '
+                                                f'{apart:,} of {n:,} selected events: more than an edge effect')
+                    if case[2] == 'multi':   # the derived regions must be neither empty nor the same as a drawn one
+                        both = regions.mask(flag, 'a_and_b')
+                        if not both.any() or np.array_equal(both, regions.mask(flag, 'box_a')):
+                            problems.append('weak test: box_a & circ_b is empty, or the same as box_a')
             status = 'PASS' if not problems else 'FAIL'
             results.append((name, status, secs, '; '.join(problems)))
             print(f'  {status}  {name:<42} {secs:6.1f} s  {"; ".join(problems)[:300]}')
@@ -547,7 +609,7 @@ def main(argv=None):
                 shutil.rmtree(folder, ignore_errors=True)   # each output is as big as the TAG file
             else:
                 (folder / 'case.txt').write_text(
-                    f'{name}\nregion {region}\ntime {time_sel}\n' + '\n'.join(problems) + '\n')
+                    f'{name}\nregions {list(regions)}\ntimes {list(times)}\n' + '\n'.join(problems) + '\n')
 
     # 4. Summary
     counts = {k: sum(1 for r in results if r[1] == k) for k in ('PASS', 'FAIL', 'SKIP')}

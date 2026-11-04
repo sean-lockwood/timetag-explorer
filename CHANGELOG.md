@@ -13,6 +13,20 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
+## [1.7.0] - Unreleased
+
+**Selection scripts (version 3.0): any number of named time ranges and regions, one bit each. The flag columns and the header change; the corrected positions, weights and edge flag are computed as before.**
+
+* `SEL_TIME` and `SEL_REGION` are now 16-bit bit-flag words (unsigned, stored with `TZERO = 32768`) instead of true/false columns: bit *n* is set when the event is inside the time range or region with that bit. The meaning of each bit is in two new extensions, `TIMESEL` and `REGSEL` (names, notes, colors, visibility, shapes and frames); see `SELECTIONS.md`. A selection written as an expression of others (`oval - io`) has no bit.
+* A selection needs only its numbers: a missing name becomes `T1`, `T2`, ... (`R1`, ... for regions), a missing bit the lowest free one, a missing color one from a default list. `make_tagsel` can be called directly without `script_version` and `tool_url`. `RegionSelection.from_array(region, frame, name=...)` takes the region first.
+* Selections are picked by name (any case) or bit position: `read_selections(path).in_region(t, 'Oval')`. Code that used `t['SEL_REGION']` as a true/false column must use these, or test a bit.
+* Regions are written in the file's coordinates: hi-res pixels counted from 1, like `AXIS1` and the position columns. A region drawn in the Explorer (0-indexed) is moved by +1 on its way into a script. Each region is tested on exactly the float32 values written to the position columns, so applying it by hand to those columns gives the same flags.
+* A region drawn in a frame always gets that frame's position columns, north-up frames and image frame included, even with `INCLUDE_NORTH_UP = False` or both corrections off.
+* If a region's frame cannot be built, the script stops before it writes anything. A region drawn on a planet map stops the script too (maps need an accurate planet registration first).
+* New header practice: `SELTMIN`, `SELTMAX`, `SELREG` and `SELFRAME` are no longer written (the tables hold them); `TTETSEL` and `TTERSEL` say whether time ranges and regions were selected.
+* New functions: `build_selections_script` (any number of selections; `build_selection_script` still makes the script for the Explorer's one window and one region), `read_selections`, `TimeRange`, `RegionSelection`, `TimeTable`, `RegionTable`, `shift_region`, and, worked out when asked and not stored, `analysis.time_exposure` and `analysis.region_stats` (area and exposure of a named region).
+* The commented examples in a script read the selections by name.
+
 ## [1.6.3] - Unreleased
 
 **Column order fix; no values or numbers change (selection script 2.4).**
