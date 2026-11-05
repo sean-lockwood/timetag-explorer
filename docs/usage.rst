@@ -21,23 +21,32 @@ Selection scripts
 -----------------
 
 :func:`timetag_explorer.build_selection_script` returns a standalone Python script that reproduces a selection on the
-original TIME-TAG file and writes a copy of it, ``<rootname>_tagsel.fits``, with columns added: the selection flags
-(``SEL_TIME`` and ``SEL_REGION``, with one bit per named time range or region; ``EDGE_OK``), the corrected image-frame position (``XCORR``, ``YCORR``) and the position
-in each reference frame (``XREST``/``YREST`` and ``XPLAN``/``YPLAN``; the north-up versions ``XRESTN``/``YRESTN`` and
-``XPLANN``/``YPLANN`` make the file much larger and are written only if the script sets ``INCLUDE_NORTH_UP = True``), and
-the weights (``FLATW``, ``VIGW``; an event counts as their product, and there is no combined column); ``AXIS1`` and
-``AXIS2`` are left as recorded. A selection is optional: without
-one the corrections are still applied and the selection columns are simply absent. The primary header says which steps
-were done (``TTERAND``, ``TTEGEO``, ``TTEFLAT``, ``TTEVIGN``, ``TTEEDGE``: ``DONE`` or ``OMIT``), the flat-field file used
-(``TTEFFILE``) and whether a time or space selection was made (``TTETSEL``, ``TTERSEL``), in one block under the label
-``/ TIMETAG-EXPLORER KEYWORDS``. They are deliberately not the calibration pipeline's step keywords (``RANDCORR``,
-``FLATCORR`` and so on, whose ``PERFORM`` means something else to ``calstis`` and ``stistools``), which are left as they
-were. The script is short: it holds
-the choices and calls :func:`timetag_explorer.tagsel.make_tagsel`, and it names the exact version of this package that
-the Explorer ran (and the ``pip install`` line for it). The region is tested at each event's own position, not on the
-Explorer's 4-pixel bins. The version of the script generator,
-:data:`timetag_explorer.SELECTION_SCRIPT_VERSION`, is written into every script and into the ``SELVER`` keyword of the
-FITS files they write; it is raised whenever a generated script would compute or write something different.
+original TIME-TAG file. The script writes a copy of the file, ``<rootname>_tagsel.fits``, with columns added. The
+original tables and ``AXIS1`` and ``AXIS2`` are left as recorded. A selection is optional: without one, the
+corrections are still applied and the selection columns are simply absent.
+
+The columns added are:
+
+* the selection flags: ``SEL_TIME`` and ``SEL_REGION`` (one bit per named time range or region) and ``EDGE_OK``;
+* the corrected image-frame position, ``XCORR`` and ``YCORR``;
+* the position in each reference frame, ``XREST``/``YREST`` and ``XPLAN``/``YPLAN``. The north-up versions,
+  ``XRESTN``/``YRESTN`` and ``XPLANN``/``YPLANN``, make the file much larger and are written only if the script sets
+  ``INCLUDE_NORTH_UP = True``;
+* the weights, ``FLATW`` and ``VIGW``. An event counts as their product; there is no combined column.
+
+The primary header records what was done, in one block under the label ``/ TIMETAG-EXPLORER KEYWORDS``: which steps
+ran (``TTERAND``, ``TTEGEO``, ``TTEFLAT``, ``TTEVIGN``, ``TTEEDGE``: ``DONE`` or ``OMIT``), the flat-field file used
+(``TTEFFILE``), and whether a time or space selection was made (``TTETSEL``, ``TTERSEL``). These names are deliberately
+not the calibration pipeline's step keywords (``RANDCORR``, ``FLATCORR`` and so on, whose ``PERFORM`` means something
+else to ``calstis`` and ``stistools``), which are left as they were.
+
+The script is short. It holds the choices and calls :func:`timetag_explorer.tagsel.make_tagsel`, and it names the exact
+version of this package that the Explorer ran, with the ``pip install`` line for it. The region is tested at each
+event's own position, not on the Explorer's 4-pixel bins.
+
+The version of the script generator, :data:`timetag_explorer.SELECTION_SCRIPT_VERSION`, is written into every script
+and into the ``SELVER`` keyword of the FITS files they write. It is raised whenever a generated script would compute or
+write something different.
 
 Several named selections
 ~~~~~~~~~~~~~~~~~~~~~~~~
