@@ -137,6 +137,12 @@ class TagDataset:
                 self._grids.move_to_end(key)
             return grid
 
+    def has_grid(self, frame: str) -> bool:
+        """True if this frame's bin grid is already built (a grid keeps an index per event in memory, so a frame that
+        has none yet would cost that much more the first time it is used)."""
+        with self._lock:
+            return any(key[0] == frame for key in self._grids)
+
     def exposure(self, t0: float = -np.inf, t1: float = np.inf) -> float:
         """Good exposure time (s) inside [t0, t1]: only time within a GTI row counts."""
         a, b = self.gti[:, 0], self.gti[:, 1]

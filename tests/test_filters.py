@@ -116,3 +116,9 @@ scaled, peak = normalized_curve(curve)
 assert peak == 8.0 and np.nanmax(scaled) == 1.0 and np.isnan(scaled[2]) and scaled[1] == 0.25
 assert curve_peak([0.0, 0.0]) == 1.0 and curve_peak([np.nan]) == 1.0 and curve_peak([]) == 1.0
 print('filters ok')
+
+# memory: which frames have a grid built already
+fresh = dataset(t, x, y)
+assert not fresh.has_grid('image') and not fresh.has_grid('rest')
+fresh.grid('image', OFF)
+assert fresh.has_grid('image') and not fresh.has_grid('rest')
