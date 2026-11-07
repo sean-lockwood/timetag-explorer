@@ -127,7 +127,16 @@ assert regions.frames('oval') == ('rest',) and regions.frames('outside') == ('re
 assert [r.name for r in regions.leaves('outside')] == ['oval', 'io'] and regions.leaves(1)[0].name == 'io'
 flags = np.array([0, 1, 2, 3], dtype=np.uint16)
 assert regions.mask(flags, 'outside').tolist() == [False, True, False, False]                # oval and not io
-refused(lambda: RegionTable([RegionSelection(name='m', region=Box(0, 1, 0, 1), frame='map_rect')]), 'maps are not supported')
+# a planet-map region is allowed in a table (the Explorer holds them), but not yet in a file
+maprow = RegionTable([RegionSelection(name='m', region=Box(0, 1, 0, 1), frame='map_rect'), RegionSelection(name='i', region=Box(0, 1, 0, 1), frame='image')])
+refused(maprow.require_file_frames, 'maps are not supported')
+RegionTable([RegionSelection(name='i', region=Box(0, 1, 0, 1), frame='image')]).require_file_frames()
+refused(lambda: RegionTable([RegionSelection(name='m', region=Box(0, 1, 0, 1), frame='nowhere')]), 'unknown reference frame')
+# degrees are not counted from 1: a map region is not shifted, a pixel region is
+degrees = RegionSelection.from_array(Box(10.0, 20.0, -5.0, 5.0), 'map_rect', name='d')
+assert degrees.region == Box(10.0, 20.0, -5.0, 5.0) and degrees.for_array() == Box(10.0, 20.0, -5.0, 5.0)
+pix = RegionSelection.from_array(Box(10.0, 20.0, 30.0, 40.0), 'image', name='p')
+assert pix.region == Box(11.0, 21.0, 31.0, 41.0) and pix.for_array() == Box(10.0, 20.0, 30.0, 40.0)
 refused(lambda: RegionTable([RegionSelection(name='m', region=Box(0, 1, 0, 1), frame='sky')]), 'unknown reference frame')
 refused(lambda: RegionTable([RegionSelection(name='m', frame='image')]), 'has no shape')
 refused(lambda: RegionTable([RegionSelection(name='m', region=Box(0, 1, 0, 1))]), 'unknown reference frame')
@@ -142,7 +151,7 @@ refused(lambda: region_from_params('BOX', [1, 2, 3]), 'cannot rebuild')
 refused(lambda: region_from_params('STAR', [1, 2, 3]), 'cannot rebuild')
 
 cols = regions.to_columns()
-assert list(cols) == ['NAME', 'NOTE', 'BIT', 'MASK', 'FRAME', 'SHAPE', 'PARAMS', 'DESCR', 'EXPR', 'COLOR', 'VISIBLE']
+assert list(cols) == ['NAME', 'NOTE', 'BIT', 'MASK', 'FRAME', 'SHAPE', 'PARAMS', 'DESCR', 'EXPR', 'COLOR', 'VISIBLE', 'CURVE']
 assert cols['BIT'].dtype == np.int16 and cols['BIT'].tolist() == [0, 1, -1] and cols['MASK'].tolist() == [1, 2, 0]
 assert cols['SHAPE'] == ['BOX', 'CIRCLE', ''] and cols['FRAME'] == ['rest', 'image', ''] and cols['EXPR'] == ['', '', 'oval - io']
 assert cols['PARAMS'].shape == (3, 4) and cols['PARAMS'][0].tolist() == [11.0, 21.0, 31.0, 41.0] and np.isnan(cols['PARAMS'][1, 3])

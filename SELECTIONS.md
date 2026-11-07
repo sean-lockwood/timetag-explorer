@@ -1,6 +1,6 @@
 # Selections in the `_tagsel.fits` file
 
-**Status: implemented in package 1.7.0 (selection script 3.0), on the `multi-selection` branch until released.** It replaces the single time window and single region
+**Status: implemented in package 1.7.0 (selection script 3.0); `CURVE` column added in 1.8.0 (selection script 3.1).** It replaces the single time window and single region
 of selection script 2.x with any number of named time ranges and regions (selection script 3.0). Nobody depends on the
 2.x layout, so there is no compatibility mode.
 
@@ -45,6 +45,7 @@ Same `NAME`, `NOTE`, `BIT`, `MASK`, `EXPR`, `COLOR`, `VISIBLE` columns, plus:
 | `SHAPE` | string | `BOX`, `CIRCLE` or `POLYGON`; empty for a derived row |
 | `PARAMS` | `nD`, pixel | shape numbers, in float64, padded with `NaN`; `n` is the longest row |
 | `DESCR` | string | the one-line description the logs already use, for people |
+| `CURVE` | `L` | the Explorer also draws this region's light curve. With `VISIBLE` (its overlay) it gives four display states: off, curve only, overlay only, on. Added in selection script 3.1; an older file has none and it reads as true. Nothing outside the Explorer needs it. |
 
 `PARAMS` by shape:
 
@@ -64,7 +65,7 @@ is a new `SHAPE` name with documented numbers; readers that do not know it can s
   the package (the region is drawn at +1, plotted at −1, and one helper hands array-based code a 0-indexed copy).
 * The flag is computed at each event's own position, on exactly the float32 values written to the position columns, so
   re-applying a region from the table by hand to those columns gives the same flags.
-* Planet-map frames (`map_*`, in degrees) are **not supported yet**: a region drawn there makes the script stop.
+* Planet-map frames (`map_*`, in degrees) are **not supported yet in a file**: the Explorer's tables can hold such a region (degrees, never shifted by one), but a region drawn there makes the script stop (`RegionTable.require_file_frames`).
 
 ## Leaving things out
 

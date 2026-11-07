@@ -211,15 +211,19 @@ class RegionSelection(_Selection):
     """Events inside `region`, drawn in `frame`; coordinates in file coordinates (hi-res pixels counted from 1)."""
     region: Region | None = None
     frame: str = ''
+    curve: bool = True       # the Explorer also draws this region's light curve; with `visible` (its overlay) that gives
+                             # four display states: off, curve only, overlay only, on. Not needed outside the Explorer.
 
     @classmethod
     def from_array(cls, region: Region, frame: str, *, name: str = '', **kwargs) -> 'RegionSelection':
-        """A region as the Explorer draws it, on 0-indexed arrays, moved to the file's coordinates (+1)."""
-        return cls(name=name, region=shift_region(region, 1.0), frame=frame, **kwargs)
+        """A region as the Explorer draws it, on 0-indexed arrays, moved to the file's coordinates (+1). A region on a
+        planet map is in degrees, which are not counted from 1, so it is not moved."""
+        return cls(region=region if is_map(frame) else shift_region(region, 1.0), frame=frame, name=name, **kwargs)
 
     def for_array(self) -> Region:
-        """The region on 0-indexed arrays (-1), for code that works on the Explorer's grids."""
-        return shift_region(self.region, -1.0)
+        """The region on 0-indexed arrays (-1), for code that works on the Explorer's grids (a planet-map region is in
+        degrees and is returned as it is)."""
+        return self.region if is_map(self.frame) else shift_region(self.region, -1.0)
 
     def check(self):
         if self.derived:
@@ -228,12 +232,8 @@ class RegionSelection(_Selection):
             return
         if self.region is None:
             raise ValueError(f'region {self.name!r} has no shape')
-        if is_map(self.frame):
-            raise ValueError(f'region {self.name!r} was drawn on a planet map ({self.frame}); maps are not supported '
-                             'yet, because they need an accurate planet registration')
-        if self.frame not in SELECTABLE_FRAMES:
-            raise ValueError(f'region {self.name!r}: unknown reference frame {self.frame!r}' if self.frame not in FRAMES
-                             else f'region {self.name!r}: frame {self.frame!r} cannot be selected')
+        if self.frame not in FRAMES:
+            raise ValueError(f'region {self.name!r}: unknown reference frame {self.frame!r}')
 
 
 def region_params(region: Region) -> tuple[str, list]:
@@ -425,6 +425,14 @@ class TimeTable(SelectionTable):
         """The set of time intervals (seconds since the exposure start) a time range covers."""
         return self.evaluate(key, lambda r: Intervals([[r.start, r.stop]]), _IntervalLogic)
 
+    def union(self, keys) -> Intervals:
+        """The time intervals covered by any of the time ranges `keys` (names or bit positions): what an image of several
+        selected times counts. No keys give an empty set."""
+        covered = Intervals()
+        for key in keys:
+            covered = covered | self.intervals(key)
+        return covered
+
     def window(self, key) -> tuple[float, float]:
         """(first start, last stop) of the intervals: the span a plot of this selection should cover."""
         rows = self.intervals(key).rows
@@ -478,7 +486,7 @@ class RegionTable(SelectionTable):
         return {**self._common_columns(), 'FRAME': [as_ascii(r.frame) for r in self.rows],
                 'SHAPE': [s for s, _ in shapes], 'PARAMS': params,
                 'DESCR': [as_ascii(r.region.describe()) if r.region is not None else '' for r in self.rows],
-                **self._tail_columns()}
+                **self._tail_columns(), 'CURVE': np.array([r.curve for r in self.rows], dtype=bool)}
 
     @classmethod
     def from_columns(cls, cols) -> 'RegionTable':
@@ -491,8 +499,17 @@ class RegionTable(SelectionTable):
                 name=str(cols['NAME'][i]).strip(), note=str(cols['NOTE'][i]).strip(), bit=int(cols['BIT'][i]),
                 frame=str(cols['FRAME'][i]).strip(), expr=expr, color=str(cols['COLOR'][i]).strip(),
                 region=None if expr else region_from_params(shape, cols['PARAMS'][i]),
-                visible=bool(cols['VISIBLE'][i])))
+                visible=bool(cols['VISIBLE'][i]),
+                curve=bool(cols['CURVE'][i]) if 'CURVE' in cols else True))     # (files from before 3.1 have no CURVE)
         return cls(rows)
+
+    def require_file_frames(self) -> None:
+        """Raise ValueError if a region was drawn on a planet map. The Explorer's tables can hold those, but the position
+        columns of a selection file cannot yet (a map needs an accurate planet registration first)."""
+        maps = [r for r in self.primitives if is_map(r.frame)]
+        if maps:
+            raise ValueError('maps are not supported yet: ' + ', '.join(f'region {r.name!r} was drawn on a planet map '
+                             f'({r.frame})' for r in maps) + '; they need an accurate planet registration first')
 
 
 @dataclass(frozen=True)

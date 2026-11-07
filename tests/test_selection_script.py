@@ -17,7 +17,7 @@ from timetag_explorer.regions import Box, Circle, Polygon, shift_region
 from timetag_explorer.selections import RegionSelection, RegionTable, Selections, TimeRange, TimeTable, single_selections
 from timetag_explorer.transforms import frame_coordinates
 
-assert tte.SELECTION_SCRIPT_VERSION == '3.0'
+assert tte.SELECTION_SCRIPT_VERSION == '3.1'
 assert tuple(EDGE_TRIM) == (30, 6, 28, 6)
 
 n = 200

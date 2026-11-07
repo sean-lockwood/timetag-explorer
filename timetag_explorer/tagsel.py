@@ -280,7 +280,7 @@ def column_definition(name: str, values: np.ndarray):
 
 
 TABLE_UNITS = {'TSTART': 's', 'TSTOP': 's', 'PARAMS': 'pixel'}
-TABLE_FORMATS = {'BIT': 'I', 'MASK': 'J', 'TSTART': 'D', 'TSTOP': 'D', 'VISIBLE': 'L'}
+TABLE_FORMATS = {'BIT': 'I', 'MASK': 'J', 'TSTART': 'D', 'TSTOP': 'D', 'VISIBLE': 'L', 'CURVE': 'L'}
 
 
 def selection_table_hdu(table, extname: str):
@@ -380,6 +380,7 @@ def make_tagsel(rootname: str, *, times=None, regions=None, corr: Corrections, s
     """
     from . import __version__
     times, regions = _as_table(times, TimeTable), _as_table(regions, RegionTable)   # (checks them)
+    regions.require_file_frames()     # (a region on a planet map stops the script here)
     folder = Path(folder).resolve()
     folder.mkdir(parents=True, exist_ok=True)
     if not os.environ.get('TAG_EXPLORER_FLAT'):

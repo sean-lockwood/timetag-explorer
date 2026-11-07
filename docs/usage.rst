@@ -82,6 +82,28 @@ A selection made from others (``RegionSelection(name='both', expr='R1 | R2')``) 
 0-indexed arrays, as the Explorer draws them, goes through ``RegionSelection.from_array(region, frame)``, which moves it
 to the file's coordinates.
 
+Several selections in the Explorer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Explorer's tables use the same rows and some more package calls. :meth:`~timetag_explorer.TagDataset.selection_mask`
+gives the per-event mask of a row of a :class:`~timetag_explorer.selections.RegionTable`, including a row made from others
+(``oval - io``) whose regions are drawn in different frames: the masks are combined event by event, so the result does not
+depend on the frame being displayed. :meth:`~timetag_explorer.TagDataset.image` takes several time windows (a list of
+pairs, or :meth:`TimeTable.union <timetag_explorer.selections.TimeTable.union>`) and ``event_mask``, which keeps only the
+events it marks, and :meth:`~timetag_explorer.TagDataset.light_curve` takes ``event_mask`` too::
+
+   mask = ds.selection_mask(regions, 'oval - io', corr)          # a name, a bit position or a derived row
+   image = ds.image(times.union(['orbit1', 'orbit2']), 'image', corr, event_mask=mask)
+   edges, rate = ds.light_curve(10.0, event_mask=mask)
+   scaled, peak = analysis.normalized_curve(rate)                 # a maximum of 1, and the factor
+
+A filtered image is divided by the exposure it got with every event allowed, so it shows the rate those events contribute
+per bin; the exposure the filter itself saw (which depends on how a filter defined in another frame moved over the
+detector) is not computed yet (:meth:`~timetag_explorer.TagDataset.filter_exposure_map` is where that would go).
+A region drawn on a planet map can be in a table (degrees), but a selection file or script refuses it for now.
+Each region row also has ``curve`` (default true): with ``visible``, the Explorer's four display states of a region
+(off, light curve only, overlay only, on), stored in the ``CURVE`` column of ``REGSEL``.
+
 Regions are in the file's coordinates, hi-res pixels counted from 1 like ``AXIS1``. Area and exposure are not stored:
 :func:`timetag_explorer.analysis.region_stats` and :func:`timetag_explorer.analysis.time_exposure` work them out when asked.
 
