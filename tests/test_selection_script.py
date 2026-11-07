@@ -364,7 +364,7 @@ assert names['t0'] == 0.0 and names['t1'] == 99.0
 # with every correction off the examples use the recorded pixels and count each event once
 s = tte.build_selection_script(ds, (10.0, 20.0), None, 'image', OFF)
 assert "t['AXIS1']" in s.code and "w *=" not in s.code and 'w = np.ones(len(t))' in s.code
-# several selections: one line each, named as in the lists; the first time range gives the window
+# multiple selections: one line each, named as in the lists; the first time range gives the window
 s = tte.build_selections_script(dsv, corr_all, many_t, many_r)
 for name in ('orbit1', 'orbit2', 'both'):
     assert s.code.count(f"# keep &= sel.in_time(t, '{name}')") == 2, name

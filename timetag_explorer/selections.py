@@ -36,13 +36,14 @@ def as_ascii(text: str) -> str:
 
 # ---- expressions ---------------------------------------------------------------------------------------------------
 
-_TOKEN = re.compile(r'\s*(?:([A-Za-z][A-Za-z0-9_]*)|([|&\-~()]))')
+_TOKEN = re.compile(r'\s*(?:([A-Za-z][A-Za-z0-9_]*)|([|&^\-~()]))')
 
 
 def parse_expression(text: str):
-    """Parse `A | B`, `A & B`, `A - B` (A and not B), `~A` and parentheses into a tree of tuples:
-    ('name', 'A'), ('not', x), ('and', x, y), ('or', x, y), ('sub', x, y).
-    Precedence: `~`, then `&` and `-` (left to right), then `|`. Raises ValueError for anything else; never uses eval."""
+    """Parse `A | B`, `A & B`, `A ^ B` (in one or the other, not both), `A - B` (A and not B), `~A` and parentheses into a
+    tree of tuples: ('name', 'A'), ('not', x), ('and', x, y), ('or', x, y), ('xor', x, y), ('sub', x, y).
+    Precedence: `~`, then `&` and `-` (left to right), then `^`, then `|` (as in Python). Raises ValueError for anything
+    else; never uses eval."""
     tokens, pos = [], 0
     text = str(text)
     while pos < len(text):
@@ -65,10 +66,17 @@ def parse_expression(text: str):
         return tokens[at[0] - 1]
 
     def or_expr():
-        left = and_expr()
+        left = xor_expr()
         while peek() == '|':
             take()
-            left = ('or', left, and_expr())
+            left = ('or', left, xor_expr())
+        return left
+
+    def xor_expr():
+        left = and_expr()
+        while peek() == '^':
+            take()
+            left = ('xor', left, and_expr())
         return left
 
     def and_expr():
@@ -111,7 +119,7 @@ def expression_names(tree) -> list:
 
 
 class _Logic:
-    """How `&`, `|` and `~` combine masks (boolean arrays)."""
+    """How `&`, `|` and `~` combine masks (boolean arrays); `^` and `-` are made from these."""
     @staticmethod
     def and_(a, b): return np.logical_and(a, b)
     @staticmethod
@@ -374,6 +382,8 @@ class SelectionTable:
                 return logic.and_(a, b)
             if tree[0] == 'or':
                 return logic.or_(a, b)
+            if tree[0] == 'xor':
+                return logic.or_(logic.and_(a, logic.not_(b)), logic.and_(logic.not_(a), b))
             return logic.and_(a, logic.not_(b))     # 'sub'
         return walk(parse_expression(row.expr))
 

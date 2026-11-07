@@ -88,11 +88,12 @@ cannot be confused. A derived row has no bit and can only be picked by name.
 |---|---|
 | `A \| B` | union |
 | `A & B` | intersection |
+| `A ^ B` | in A or B but not both (exclusive or) |
 | `A - B` | A and not B (same as `A & ~B`) |
 | `~A` | not A |
 | `( )` | grouping |
 
-Precedence is `~`, then `&` and `-`, then `\|`; use parentheses to be clear. The text is parsed by the package, never
+Precedence is `~`, then `&` and `-`, then `^`, then `\|` (as in Python); use parentheses to be clear. The text is parsed by the package, never
 passed to `eval`. Time ranges and regions are separate tables and cannot refer to each other.
 Combining across frames is exact, because each bit is already an event-level flag.
 

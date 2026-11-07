@@ -82,7 +82,7 @@ A selection made from others (``RegionSelection(name='both', expr='R1 | R2')``) 
 0-indexed arrays, as the Explorer draws them, goes through ``RegionSelection.from_array(region, frame)``, which moves it
 to the file's coordinates.
 
-Several selections in the Explorer
+Multiple selections in the Explorer
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The Explorer's tables use the same rows and some more package calls. :meth:`~timetag_explorer.TagDataset.selection_mask`

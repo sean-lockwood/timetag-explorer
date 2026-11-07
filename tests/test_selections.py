@@ -23,7 +23,7 @@ def refused(function, text):
     raise SystemExit(f'expected an error containing {text!r}')
 
 
-# ---- expressions: precedence ~, then & and - (left to right), then | --------------------------------------------------
+# ---- expressions: precedence ~, then & and - (left to right), then ^, then | --------------------------------------------------
 assert parse_expression('A') == ('name', 'A')
 assert parse_expression('a | b & c') == ('or', ('name', 'a'), ('and', ('name', 'b'), ('name', 'c')))
 assert parse_expression('a & b - c') == ('sub', ('and', ('name', 'a'), ('name', 'b')), ('name', 'c'))
@@ -31,9 +31,16 @@ assert parse_expression('a - b - c') == ('sub', ('sub', ('name', 'a'), ('name', 
 assert parse_expression('~a & b') == ('and', ('not', ('name', 'a')), ('name', 'b'))
 assert parse_expression('~(a | b)') == ('not', ('or', ('name', 'a'), ('name', 'b')))
 assert expression_names(parse_expression('(a | b) - ~c')) == ['a', 'b', 'c']
+assert parse_expression('a | b ^ c & d') == ('or', ('name', 'a'), ('xor', ('name', 'b'), ('and', ('name', 'c'), ('name', 'd'))))
+assert parse_expression('a ^ b ^ c') == ('xor', ('xor', ('name', 'a'), ('name', 'b')), ('name', 'c'))
+assert parse_expression('a - b ^ c') == ('xor', ('sub', ('name', 'a'), ('name', 'b')), ('name', 'c'))
 for bad, why in (('', 'empty'), ('a b', 'unexpected'), ('a |', 'name was expected'), ('(a', 'missing'), ('a $ b', 'cannot read'),
                  ('1 | a', 'cannot read'), ('__import__("os")', 'cannot read')):
     refused(lambda: parse_expression(bad), why)
+
+_xor = TimeTable([TimeRange(name='a', start=0.0, stop=60.0), TimeRange(name='b', start=40.0, stop=100.0),
+                  TimeRange(name='either', expr='a ^ b')])
+assert _xor.intervals('either').rows.tolist() == [[0.0, 40.0], [60.0, 100.0]]
 
 # ---- time ranges: bits, names, picking ------------------------------------------------------------------------------
 times = TimeTable([TimeRange(name='orbit1', start=0.0, stop=1500.0, note='first'),

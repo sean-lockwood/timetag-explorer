@@ -15,11 +15,12 @@ to the version that made it.
 
 ## [1.8.0] - Unreleased
 
-**Several selections in the Explorer (selection script 3.1). Results with a single selection do not change.**
+**Multiple selections in the Explorer (selection script 3.1). Results with a single selection do not change.**
 
 * Images take several time windows and an event mask: `TagDataset.image(time_sel, frame, corr, event_mask=...)`. `time_sel` may be None, a `(start, stop)` pair, or a list of pairs or an `Intervals` (the events of all of them are counted, over their total good time). `event_mask` keeps only the events it marks, whatever frame the mask was made in. `TagDataset.light_curve` takes `event_mask` too. With the exposure-time correction on, a filtered image is divided by the exposure it got with every event allowed (`TagDataset.filter_exposure_map`, a documented stub: the exposure the filter itself sees is not computed yet).
 * `TagDataset.selection_mask(regions, key, corr)` gives the per-event mask of a row of a `RegionTable`. A row made from others (`oval - io`) combines its regions event by event, so they may be drawn in different frames. `TimeTable.union(keys)` gives the time intervals of several time ranges.
 * A `RegionTable` may hold a region drawn on a planet map (degrees, not shifted by `from_array` or `for_array`); a selection file or script still refuses it (`RegionTable.require_file_frames`), until an accurate planet registration can be stated.
+* Expressions accept `^` (in one or the other, not both): `a ^ b`, between `&` and `|` in precedence.
 * `RegionSelection.curve` (default True) and the `CURVE` column of `REGSEL`: with `visible`, the Explorer's four display states for a region (off, light curve only, overlay only, on). Nothing needs to set it outside the Explorer. Files from selection script 3.0 have no `CURVE` and read as True.
 * `analysis.normalized_curve` and `analysis.curve_peak`: a light curve scaled to a maximum of 1, and the factor.
 
