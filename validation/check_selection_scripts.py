@@ -230,6 +230,25 @@ def reference_columns(te, ds, order, case, times, regions, north_up=False):
         for row in regions.primitives if regions else ():
             if row.frame == f:
                 region_bits[np.asarray(row.region.contains(x1, y1), dtype=bool)] |= np.uint16(1 << row.bit)   # each event's own position
+    # planet-map columns (experimental): degrees, NaN where an event misses the planet, never shifted by one. MAPLON and MAPLAT
+    # are written whenever the exposure supports maps; a polar map's pair only when a region was drawn on it.
+    for f, names in te.MAP_COLUMNS.items():
+        if f != 'map_rect' and f not in used:
+            continue
+        try:
+            ds.prepare_frame(f)
+            if ds.frame_info.unavailable_reason(f):
+                continue
+            u, v, keep = te.map_coordinates(ds, f, corr)
+        except ValueError:
+            continue          # no map for this exposure
+        u = np.where(keep, u, np.float32('nan')).astype(np.float32)
+        v = np.where(keep, v, np.float32('nan')).astype(np.float32)
+        positions[names[0]], positions[names[1]] = u, v
+        for row in regions.primitives if regions else ():
+            if row.frame == f:
+                with np.errstate(invalid='ignore'):
+                    region_bits[np.asarray(row.region.contains(u, v), dtype=bool) & keep] |= np.uint16(1 << row.bit)
     if regions:
         flags['SEL_REGION'] = region_bits
     if valid is not None:
@@ -242,7 +261,8 @@ def reference_columns(te, ds, order, case, times, regions, north_up=False):
         weights['VIGW'] = gain
     ordered = {name: flags[name] for name in ('SEL_TIME', 'SEL_REGION', 'EDGE_OK') if name in flags}
     ordered.update({name: positions[name] for name in ('XCORR', 'YCORR', 'XREST', 'YREST', 'XRESTN', 'YRESTN',
-                                                       'XPLAN', 'YPLAN', 'XPLANN', 'YPLANN') if name in positions})
+                                                       'XPLAN', 'YPLAN', 'XPLANN', 'YPLANN', 'MAPLON', 'MAPLAT', 'MAPNX', 'MAPNY',
+                                                       'MAPSX', 'MAPSY') if name in positions})
     return {name: to_file_order(values, order) for name, values in {**ordered, **weights}.items()}
 
 
@@ -273,7 +293,8 @@ def run_script(code, filename, tag_path, folder, timeout, shared=()):
 
 
 def same(a, b):
-    return a.shape == b.shape and bool(np.array_equal(a, b))
+    nan = a.dtype.kind == 'f' and b.dtype.kind == 'f'      # (events that miss the planet are NaN in the map columns)
+    return a.shape == b.shape and bool(np.array_equal(a, b, equal_nan=nan))
 
 
 # Keywords that describe the table's layout, which the script rebuilds: column definitions (TTYPEn, TFORMn, TSCALn ...)
@@ -292,7 +313,7 @@ def same_value(a, b):
     return a == b
 
 
-def check_output(te, fits, case, times, regions, expected, tag_path, folder, rootname):
+def check_output(te, fits, ds, case, times, regions, expected, tag_path, folder, rootname):
     """Problems found in the script's output file (an empty list means it is right)."""
     frame, shape, selection, (rand, geo, flat, edge) = case
     problems = []
@@ -355,7 +376,7 @@ def check_output(te, fits, case, times, regions, expected, tag_path, folder, roo
         history = '\n'.join(str(c) for c in new[1].header['HISTORY']) + '\n' + '\n'.join(str(c) for c in header['HISTORY'])
         # which steps ran: DONE only when the step took effect (its columns were written)
         done = {'TTERAND': rand, 'TTEGEO': geo, 'TTEFLAT': 'FLATW' in expected, 'TTEVIGN': 'VIGW' in expected,
-                'TTEEDGE': 'EDGE_OK' in expected}
+                'TTEEDGE': 'EDGE_OK' in expected, 'TTEMAP': 'MAPLON' in expected}
         checks = [(header.get(key) == ('DONE' if on else 'OMIT'), f'{key} {header.get(key)!r}') for key, on in done.items()]
         # this tool's keywords form one block under the label card, in the order the package writes them, and the
         # calibration pipeline's own step keywords are untouched (they are compared with the original file below)
@@ -376,6 +397,17 @@ def check_output(te, fits, case, times, regions, expected, tag_path, folder, roo
                    (host in str(header.get('SELURL', '')), f'SELURL {header.get("SELURL")!r}'),
                    (host in history, 'tool URL missing from HISTORY'),
                    ('v' + te.SELECTION_SCRIPT_VERSION in history, 'script version missing from HISTORY')]
+        if done['TTEMAP']:      # the registration the map columns were made with (the defaults here: no offsets)
+            geom = ds.planet_geometry()
+            corr_ = te.Corrections(randcorr=rand, geocorr=geo, flatcorr=flat, timecorr=edge)
+            want_ = {'MAPDX': 0.0, 'MAPDY': 0.0, 'MAPALT': float(geom.altitude_km(corr_)),
+                     'MAPLCEN': float(te.map_longitude_centre(geom.orient))}
+            checks += [(key in header and same_value(header[key], value), f'{key} {header.get(key)!r}, expected {value}')
+                       for key, value in want_.items()]
+            flat_history = history.replace('\n', '')      # (astropy wraps a long HISTORY line over several cards)
+            checks.append(('(MAPLCEN)' in flat_history and 'Planet-map columns (experimental)' in flat_history, 'the planet-map HISTORY lines'))
+        else:
+            checks.append((not {'MAPDX', 'MAPDY', 'MAPALT', 'MAPLCEN'} & set(header), 'MAP keywords without MAP columns'))
         if done['TTEEDGE']:
             checks += [(header.get(key) == pixels, f'{key} {header.get(key)!r}, expected {pixels}')
                        for key, pixels in zip(('SELEDGEL', 'SELEDGER', 'SELEDGEB', 'SELEDGET'), te.EDGE_TRIM)]
@@ -466,6 +498,8 @@ def main(argv=None):
         SELECTION_SCRIPT_VERSION=tte.SELECTION_SCRIPT_VERSION, TIME_DECIMALS=constants.TIME_DECIMALS,
         EDGE_TRIM=constants.EDGE_TRIM, tool_url=tte.selection_script.tool_url, RANDOM_SEED=constants.RANDOM_SEED,
         POSITION_COLUMNS=tagsel.POSITION_COLUMNS, frame_coordinates=transforms.frame_coordinates,
+        MAP_COLUMNS=tagsel.MAP_COLUMNS, map_coordinates=transforms.map_coordinates,
+        map_longitude_centre=transforms.map_longitude_centre,
         load_geo_lut=transforms.load_geo_lut,
         _is_sorted=tte_dataset._is_sorted, _load_dataset_uncached=tte_dataset._load_dataset_uncached)
 
@@ -581,7 +615,7 @@ def main(argv=None):
             else:
                 expected = reference_columns(te, ds, order, case, times, regions)
                 try:
-                    problems = check_output(te, fits, case, times, regions, expected, tag_path, folder, rootname)
+                    problems = check_output(te, fits, ds, case, times, regions, expected, tag_path, folder, rootname)
                 except Exception as exc:
                     problems = [f'could not check the output: {exc!r}']
                 if not problems and regions:

@@ -32,10 +32,14 @@ The columns added are:
 * the position in each reference frame, ``XREST``/``YREST`` and ``XPLAN``/``YPLAN``. The north-up versions,
   ``XRESTN``/``YRESTN`` and ``XPLANN``/``YPLANN``, make the file much larger and are written only if the script sets
   ``INCLUDE_NORTH_UP = True``;
+* for an observation of Jupiter or Saturn (or one of their moons), the experimental planet-map coordinates ``MAPLON`` and
+  ``MAPLAT`` (west longitude and planetographic latitude, degrees, ``NaN`` where the event misses the planet). The polar
+  map coordinates ``MAPNX``/``MAPNY`` and ``MAPSX``/``MAPSY`` are written only if a region was drawn on them. They depend on the
+  planet registration, which the script and the header record (``MAPDX``, ``MAPDY``, ``MAPALT``, ``MAPLCEN``);
 * the weights, ``FLATW`` and ``VIGW``. An event counts as their product; there is no combined column.
 
 The primary header records what was done, in one block under the label ``/ TIMETAG-EXPLORER KEYWORDS``: which steps
-ran (``TTERAND``, ``TTEGEO``, ``TTEFLAT``, ``TTEVIGN``, ``TTEEDGE``: ``DONE`` or ``OMIT``), the flat-field file used
+ran (``TTERAND``, ``TTEGEO``, ``TTEFLAT``, ``TTEVIGN``, ``TTEEDGE``, ``TTEMAP``: ``DONE`` or ``OMIT``), the flat-field file used
 (``TTEFFILE``), and whether a time or space selection was made (``TTETSEL``, ``TTERSEL``). These names are deliberately
 not the calibration pipeline's step keywords (``RANDCORR``, ``FLATCORR`` and so on, whose ``PERFORM`` means something
 else to ``calstis`` and ``stistools``), which are left as they were.

@@ -1,6 +1,6 @@
 # Selections in the `_tagsel.fits` file
 
-**Status: implemented in package 1.7.0 (selection script 3.0); `CURVE` column added in 1.8.0 (selection script 3.1).** It replaces the single time window and single region
+**Status: implemented in package 1.7.0 (selection script 3.0); `CURVE` column added in 1.8.0 (selection script 3.1); planet-map columns added in 1.9.0 (selection script 3.2).** It replaces the single time window and single region
 of selection script 2.x with any number of named time ranges and regions (selection script 3.0). Nobody depends on the
 2.x layout, so there is no compatibility mode.
 
@@ -65,7 +65,7 @@ is a new `SHAPE` name with documented numbers; readers that do not know it can s
   the package (the region is drawn at +1, plotted at −1, and one helper hands array-based code a 0-indexed copy).
 * The flag is computed at each event's own position, on exactly the float32 values written to the position columns, so
   re-applying a region from the table by hand to those columns gives the same flags.
-* Planet-map frames (`map_*`, in degrees) are **not supported yet in a file**: the Explorer's tables can hold such a region (degrees, never shifted by one), but a region drawn there makes the script stop (`RegionTable.require_file_frames`).
+* Planet-map frames (`map_*`, **experimental**) are in **degrees** and are never shifted by one. A region drawn on the rectangular map is tested on the `MAPLON` (west longitude, unwrapped around `MAPLCEN`) and `MAPLAT` (planetographic latitude) columns; one drawn on a polar map, on `MAPNX`/`MAPNY` (north) or `MAPSX`/`MAPSY` (south), degrees of colatitude in the azimuthal-equidistant plane. Events that miss the planet are `NaN` there and are in no region. `MAPLON`/`MAPLAT` are written whenever the exposure is of Jupiter or Saturn (or one of their moons), the polar columns only when a region was drawn on them. The columns depend on the planet registration, which is recorded in the primary header (`MAPDX`, `MAPDY`: planet-centre offsets in hi-res pixels; `MAPALT`: emission altitude in km; `MAPLCEN`: the centre longitude of the rectangular map) and in the script's `CORRECTIONS`. Changing the registration changes these coordinates, so a region drawn under one registration is not valid under another.
 
 ## Leaving things out
 

@@ -13,6 +13,15 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
+## [1.9.0] - Unreleased
+
+**Planet-map coordinates in the `_tagsel.fits` file (selection script 3.2, experimental), and a new default emission altitude. A planet-map result changes with the altitude; nothing else does.**
+
+* The default emission altitude is **1000 km for both Jupiter and Saturn** (was 400 km and 1100 km). Planet-map coordinates, and anything selected on them, move accordingly unless the altitude was set explicitly.
+* The selection file and script now carry the planet-map frames, which stay experimental. For an exposure of Jupiter or Saturn (or one of their moons) the file gets `MAPLON` (west longitude, unwrapped around the map centre) and `MAPLAT` (planetographic latitude), in degrees, `NaN` where the event misses the planet. The polar columns `MAPNX`/`MAPNY` and `MAPSX`/`MAPSY` are written when a region was drawn on that map. A region drawn on a planet map is tested at each event's own position on these columns, in degrees (never shifted by one), and is no longer refused (`RegionTable.require_file_frames` is gone).
+* The registration the map columns were made with is recorded: `MAPDX`, `MAPDY` (planet-centre offsets, hi-res pixels), `MAPALT` (emission altitude, km) and `MAPLCEN` (centre longitude of the rectangular map) in the primary header, with `TTEMAP` (`DONE` or `OMIT`) among the step keywords, and `centre_dx`, `centre_dy` and `altitude_km` in the script's `CORRECTIONS`, so that the script reproduces the columns even if a default changes. A different registration gives different coordinates, so a region drawn on a map under one registration does not apply under another.
+* A selection script no longer says it is experimental: it is the public science code with a call to `make_tagsel`. The planet maps and planet registration still are.
+
 ## [1.8.0] - Unreleased
 
 **Multiple selections in the Explorer (selection script 3.1). Results with a single selection do not change.**

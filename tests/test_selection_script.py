@@ -17,7 +17,7 @@ from timetag_explorer.regions import Box, Circle, Polygon, shift_region
 from timetag_explorer.selections import RegionSelection, RegionTable, Selections, TimeRange, TimeTable, single_selections
 from timetag_explorer.transforms import frame_coordinates
 
-assert tte.SELECTION_SCRIPT_VERSION == '3.1'
+assert tte.SELECTION_SCRIPT_VERSION == '3.2'
 assert tuple(EDGE_TRIM) == (30, 6, 28, 6)
 
 n = 200
@@ -136,11 +136,12 @@ assert not calls
 calls.clear(); run_script(s.code.replace('ALLOW_OTHER_VERSION = False', 'ALLOW_OTHER_VERSION = True'), version='0.0.1')
 assert len(calls) == 1
 
-# a region drawn on a planet map (experimental) is not carried over, and the script says so
+# a region drawn on a planet map (experimental) is carried over, in degrees, with no warning
 s = tte.build_selection_script(ds, (10.0, 20.0), Box(0, 10, 0, 10), 'map_rect', OFF)
-assert len(s.warnings) == 1 and 'map' in s.warnings[0] and 'not supported' in s.warnings[0]
+assert not s.warnings, s.warnings
 calls.clear(); run_script(s.code)
-assert not calls[0][1]['regions'] and [r.name for r in calls[0][1]['times']] == ['T1'] and calls[0][1]['times'][0].start == 10.0
+assert [r.frame for r in calls[0][1]['regions']] == ['map_rect'] and [r.name for r in calls[0][1]['times']] == ['T1']
+assert calls[0][1]['regions'][0].region == Box(0, 10, 0, 10)
 
 
 # the instruction to install the package: a release from PyPI, or exactly the branch / commit / archive that is running
@@ -391,8 +392,8 @@ def header(times, regions, corr, dsx=exp):
     return {k: val for k, val, c in tagsel.primary_keywords(times or TimeTable(), regions or RegionTable(), corr, cols, '2.0', 'https://x')}
 
 h = header(one_time, RegionTable([box]), on)
-assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['DONE', 'OMIT', 'DONE', 'OMIT', 'DONE'], h     # rand, geo, flat, vign, edge
-assert tagsel.STEP_KEYWORDS == ('TTERAND', 'TTEGEO', 'TTEFLAT', 'TTEVIGN', 'TTEEDGE')
+assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['DONE', 'OMIT', 'DONE', 'OMIT', 'DONE', 'OMIT'], h     # rand, geo, flat, vign, edge, map
+assert tagsel.STEP_KEYWORDS == ('TTERAND', 'TTEGEO', 'TTEFLAT', 'TTEVIGN', 'TTEEDGE', 'TTEMAP')
 assert h['TTEFFILE'] == 'combined_flat.fits'                  # the flat file used (not PFLTFILE / LFLTFILE)
 assert h['TTETSEL'] is True and h['TTERSEL'] is True and h['RANDSEED'] == RANDOM_SEED
 assert not {'SELTMIN', 'SELTMAX', 'SELREG', 'SELFRAME'} & set(h)       # the TIMESEL and REGSEL tables hold the selections
@@ -405,7 +406,7 @@ assert not pipeline & set(h) and 'PERFORM' not in h.values()
 cols_ = tagsel.selection_columns(exp, one_time, RegionTable([box]), on)
 cards = tagsel.primary_keywords(one_time, RegionTable([box]), on, cols_, '2.0', 'https://x')
 names = [k for k, _, _ in cards]
-assert names[:8] == ['TTERAND', 'TTEGEO', 'TTEFLAT', 'TTEVIGN', 'TTEEDGE', 'TTEFFILE', 'TTETSEL', 'TTERSEL'], names
+assert names[:9] == ['TTERAND', 'TTEGEO', 'TTEFLAT', 'TTEVIGN', 'TTEEDGE', 'TTEMAP', 'TTEFFILE', 'TTETSEL', 'TTERSEL'], names
 assert names[-3:] == ['SELVER', 'TTEVER', 'SELURL'] and len(set(names)) == len(names)
 assert not any('DONE or OMIT' in c for _, _, c in cards)     # (the value says it)
 # every card fits the 80 characters of a FITS card (value padded as astropy writes it)
@@ -414,7 +415,7 @@ for key, value, comment in cards:
     assert width + (3 + len(comment) if comment else 0) <= 80 or isinstance(value, str) and len(value) > 40, (key, width, comment)
 h = header(one_time, None, OFF)
 assert h['TTETSEL'] is True and h['TTERSEL'] is False
-assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['OMIT'] * 5 and 'RANDSEED' not in h and 'SELEDGEL' not in h and 'TTEFFILE' not in h
+assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['OMIT'] * 6 and 'RANDSEED' not in h and 'SELEDGEL' not in h and 'TTEFFILE' not in h
 h = header(None, None, replace(OFF, geocorr=True))
 assert h['TTETSEL'] is False and h['TTERSEL'] is False and h['TTEGEO'] == 'DONE' and h['TTERAND'] == 'OMIT'
 # a step is DONE only if it took effect: no flat found, or a vignetting model for another aperture
@@ -513,13 +514,72 @@ try:
     assert not empty.times and not empty.regions
 finally:
     tagsel.fits = real_fits
-# a map frame stops the script before anything is read or downloaded
+
+# ---- planet-map columns (experimental): MAPLON/MAPLAT with the registration they depend on ---------------------------
+# (the real map coordinates need ephemerides, so the plane and the geometry are stand-ins here; planet.py and transforms.py
+# are tested elsewhere, and validation/check_selection_scripts.py runs the whole path on real data)
+class MapInfo(FrameInfo):
+    body = 'JUPITER'
+    def unavailable_reason(self, frame): return None if frame in ('map_rect', 'map_north', 'map_south') else super().unavailable_reason(frame)
+
+plane_calls = []
+def fake_map_coordinates(dsx, frame, corr):
+    plane_calls.append(frame)
+    n_ = len(dsx.time)
+    u_ = np.linspace(200.0, 260.0, n_).astype(np.float32); v_ = np.linspace(-40.0, 40.0, n_).astype(np.float32)
+    return u_, v_, np.arange(n_) % 5 != 0                    # every fifth event misses the planet
+
+geometry = types.SimpleNamespace(orient=types.SimpleNamespace(), altitude_km=lambda corr: 1000.0 if corr.altitude_km is None else corr.altitude_km)
+real_mc, real_mlc = tagsel.map_coordinates, tagsel.map_longitude_centre
+tagsel.map_coordinates, tagsel.map_longitude_centre = fake_map_coordinates, lambda orient: 230.0
+planet_ds = dataset(t, xs, ys, weight=w)
+planet_ds.frame_info = MapInfo(orientat=30.0, slew_angle=45.0, slew_rate=500.0, **{})
+planet_ds.prepare_frame = lambda f: None
+planet_ds.planet_geometry = lambda: geometry
 try:
-    tagsel.make_tagsel.__wrapped__('odtest01q', regions=[RegionSelection(name='m', frame='map_rect', region=drawn)], corr=OFF,
-                       script_version='3.0', tool_url='https://x')
-    raise SystemExit('a region on a planet map must stop the script')
-except ValueError as err:
-    assert 'maps are not supported' in str(err)
+    cols = tagsel.selection_columns(planet_ds, None, None, replace(on, centre_dx=1.5, centre_dy=-2.0, altitude_km=900.0))
+    names_ = [c for c in cols.arrays if c.startswith('MAP')]
+    assert names_ == ['MAPLON', 'MAPLAT'], names_                       # polar maps only with a region
+    assert list(cols.arrays).index('YREST') < list(cols.arrays).index('MAPLON')   # after the pixel frames
+    lon_, lat_ = cols.arrays['MAPLON'], cols.arrays['MAPLAT']
+    off_planet = np.arange(len(lon_)) % 5 == 0
+    assert lon_.dtype == np.float32 and np.isnan(lon_[off_planet]).all() and np.isnan(lat_[off_planet]).all()
+    assert np.isfinite(lon_[~off_planet]).all() and lon_[~off_planet].min() >= 200.0 and lat_[~off_planet].max() <= 40.0
+    assert cols.map_registration == {'MAPDX': 1.5, 'MAPDY': -2.0, 'MAPALT': 900.0, 'MAPLCEN': 230.0}, cols.map_registration
+    assert any('MAPLCEN' in line and 'experimental' in line for line in cols.history)
+    cards = {k: (val, c) for k, val, c in tagsel.primary_keywords(TimeTable(), RegionTable(), replace(on, centre_dx=1.5, centre_dy=-2.0, altitude_km=900.0), cols, '2.0', 'https://x')}
+    assert cards['TTEMAP'][0] == 'DONE' and cards['MAPDX'][0] == 1.5 and cards['MAPDY'][0] == -2.0 and cards['MAPALT'][0] == 900.0 and cards['MAPLCEN'][0] == 230.0
+    assert all(len(f'{k:<8}= {v!r:>20} / {c}') <= 80 for k, (v, c) in cards.items() if k.startswith('MAP')), cards
+    # the default registration is recorded as the body's default altitude (1000 km), not as "default"
+    assert tagsel.selection_columns(planet_ds, None, None, on).map_registration['MAPALT'] == 1000.0
+
+    # a region drawn on the map is tested at each event's own (longitude, latitude); events off the planet are in no region
+    mapbox = RegionSelection(name='M1', frame='map_rect', region=Box(220.0, 240.0, -10.0, 10.0))
+    cols = tagsel.selection_columns(planet_ds, None, RegionTable([mapbox]), on)
+    inside = np.where(np.isfinite(cols.arrays['MAPLON']), (cols.arrays['MAPLON'] >= 220.0) & (cols.arrays['MAPLON'] <= 240.0)
+                      & (cols.arrays['MAPLAT'] >= -10.0) & (cols.arrays['MAPLAT'] <= 10.0), False)
+    assert inside.any() and not inside.all()
+    assert np.array_equal((cols.arrays['SEL_REGION'] & 1) != 0, inside), 'the region is applied to the MAP columns'
+    assert not (cols.arrays['SEL_REGION'][np.isnan(cols.arrays['MAPLON'])]).any()
+    assert 'MAPNX' not in cols.arrays                              # drawn on the rectangular map only
+    polar = RegionSelection(name='P1', frame='map_north', region=Box(-10.0, 10.0, -10.0, 10.0))
+    cols = tagsel.selection_columns(planet_ds, None, RegionTable([polar]), on)
+    assert [c for c in cols.arrays if c.startswith('MAP')] == ['MAPLON', 'MAPLAT', 'MAPNX', 'MAPNY'], list(cols.arrays)
+    # the script carries the registration, so that rerunning it reproduces the columns
+    code = tte.build_selection_script(planet_ds, None, Box(220.0, 240.0, -10.0, 10.0), 'map_rect', replace(on, centre_dx=1.5, centre_dy=-2.0, altitude_km=None)).code
+    assert 'centre_dx=1.5' in code and 'centre_dy=-2.0' in code and 'altitude_km=1000.0' in code, code
+    code = tte.build_selection_script(planet_ds, None, None, 'map_rect', on).code
+    assert 'centre_dx' not in code and 'altitude_km=1000.0' in code
+finally:
+    tagsel.map_coordinates, tagsel.map_longitude_centre = real_mc, real_mlc
+# a non-planet exposure writes no MAP columns and reports nothing left out for them
+plain = tagsel.selection_columns(exp, None, None, on)
+assert not [c for c in plain.arrays if c.startswith('MAP')] and not plain.map_registration
+assert not [name for name, _ in plain.skipped if 'map' in name.lower()]
+# the default emission altitude of both planets
+from timetag_explorer.planet import BODIES
+assert BODIES['JUPITER'].altitude_km == 1000.0 and BODIES['SATURN'].altitude_km == 1000.0
+
 print('selection script ok')
 
 # called directly, make_tagsel needs no script version or tool address

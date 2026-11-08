@@ -513,14 +513,6 @@ class RegionTable(SelectionTable):
                 curve=bool(cols['CURVE'][i]) if 'CURVE' in cols else True))     # (files from before 3.1 have no CURVE)
         return cls(rows)
 
-    def require_file_frames(self) -> None:
-        """Raise ValueError if a region was drawn on a planet map. The Explorer's tables can hold those, but the position
-        columns of a selection file cannot yet (a map needs an accurate planet registration first)."""
-        maps = [r for r in self.primitives if is_map(r.frame)]
-        if maps:
-            raise ValueError('maps are not supported yet: ' + ', '.join(f'region {r.name!r} was drawn on a planet map '
-                             f'({r.frame})' for r in maps) + '; they need an accurate planet registration first')
-
 
 @dataclass(frozen=True)
 class Selections:
