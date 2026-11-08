@@ -15,6 +15,13 @@ are not changed. Added columns, in time-tag row order:
   positions: `XREST`/`YREST` (target rest frame) and `XPLAN`/`YPLAN` (planet rest frame, for moon observations). The
   north-up frames, `XRESTN`/`YRESTN` and `XPLANN`/`YPLANN`, are written only with `north_up=True` or when a region was
   drawn in one (they make the file larger);
+* planet-map positions (`E`, float32, degrees; experimental, Jupiter and Saturn observations): `MAPLON`/`MAPLAT`, the
+  west longitude (unwrapped around the map's centre longitude, so it can lie outside 0-360) and planetographic latitude
+  of the point of the planet's emission surface each event is seen at, NaN for events that miss the planet. The polar
+  maps, `MAPNX`/`MAPNY` (north) and `MAPSX`/`MAPSY` (south), the azimuthal-equidistant planes the Explorer's polar maps
+  are drawn in (colatitude in degrees from the pole, longitude 180 at the top), only when a region was drawn in one.
+  They depend on the planet registration (the centre offsets and the emission altitude), which the primary header
+  records (`MAPDX`, `MAPDY`, `MAPALT`, `MAPLCEN`);
 * weights (`E`): `FLATW` (flat field) and `VIGW` (vignetting model, F25SRF2 only), for the corrections that are on.
   An event's weight is their product; they are separate columns so either can be left out of a calculation.
 
@@ -45,13 +52,15 @@ from .dataset import TagDataset, _is_sorted, load_dataset
 from .frames import FRAMES, Corrections, frame_label, is_map, is_north, is_planet
 from .regions import region_source
 from .selections import RegionTable, Selections, TimeTable
-from .transforms import frame_coordinates, load_geo_lut
+from .transforms import frame_coordinates, load_geo_lut, map_coordinates, map_longitude_centre
 
 # Columns of the positions in each reference frame (the image frame is XCORR / YCORR).
 POSITION_COLUMNS = {'rest': ('XREST', 'YREST'), 'rest_north': ('XRESTN', 'YRESTN'),
                     'planet': ('XPLAN', 'YPLAN'), 'planet_north': ('XPLANN', 'YPLANN')}
 CORRECTED_COLUMNS = ('XCORR', 'YCORR')
-PIXEL_FRAMES = ('image',) + tuple(POSITION_COLUMNS)    # the frames with position columns; maps are not written
+MAP_COLUMNS = {'map_rect': ('MAPLON', 'MAPLAT'), 'map_north': ('MAPNX', 'MAPNY'), 'map_south': ('MAPSX', 'MAPSY')}
+MAP_KEYWORDS = ('MAPDX', 'MAPDY', 'MAPALT', 'MAPLCEN')   # the planet registration the map columns were made with
+PIXEL_FRAMES = ('image',) + tuple(POSITION_COLUMNS)    # the frames with pixel position columns
 EDGE_TRIM_TEXT = f'left {EDGE_TRIM.left}, right {EDGE_TRIM.right}, bottom {EDGE_TRIM.bottom}, top {EDGE_TRIM.top}'
 
 
@@ -64,6 +73,7 @@ class TagselColumns:
     history: list = field(default_factory=list)    # lines for the FITS HISTORY
     times: TimeTable = field(default_factory=TimeTable)         # the time ranges, as flagged in SEL_TIME
     regions: RegionTable = field(default_factory=RegionTable)   # the regions, as flagged in SEL_REGION
+    map_registration: dict = field(default_factory=dict)        # MAPDX, MAPDY, MAPALT, MAPLCEN, when map columns are written
 
 
 def _positions(ds: TagDataset, frame: str, corr: Corrections):
@@ -72,6 +82,34 @@ def _positions(ds: TagDataset, frame: str, corr: Corrections):
     geo_lut = load_geo_lut() if corr.geocorr else None
     return frame_coordinates(ds.x, ds.y, ds.time, ds.frame_info, frame, corr,
                              seed=RANDOM_SEED, geo_lut=geo_lut, track=track)
+
+
+def _map_positions(ds: TagDataset, frame: str, corr: Corrections):
+    """(u, v) of every event in a planet-map plane (degrees, float32; NaN for events that miss the planet), as the
+    Explorer's map frames compute them."""
+    reason = ds.frame_info.unavailable_reason(frame)
+    if reason:
+        raise ValueError(f'{frame_label(ds.frame_info, frame)} unavailable: {reason}')
+    u, v, keep = map_coordinates(ds, frame, corr)
+    u, v = np.where(keep, u, np.float32('nan')).astype(np.float32), np.where(keep, v, np.float32('nan')).astype(np.float32)
+    return u, v
+
+
+def map_registration(ds: TagDataset, corr: Corrections) -> dict:
+    """What the planet-map columns depend on besides the pixels: the planet-centre offsets (hi-res pixels) and the emission
+    altitude (km) the exposure was registered with, and the centre longitude of the rectilinear map."""
+    geom = ds.planet_geometry()
+    return {'MAPDX': float(corr.centre_dx), 'MAPDY': float(corr.centre_dy), 'MAPALT': float(geom.altitude_km(corr)),
+            'MAPLCEN': float(map_longitude_centre(geom.orient))}
+
+
+def map_history(ds: TagDataset, corr: Corrections) -> list:
+    """HISTORY lines saying what the planet-map columns are made with."""
+    r = map_registration(ds, corr)
+    return [f'Planet-map columns (experimental): planet-centre offset ({r["MAPDX"]:g}, {r["MAPDY"]:g}) hi-res pixels and '
+            f'emission altitude {r["MAPALT"]:g} km, as MAPDX, MAPDY and MAPALT; the longitude MAPLON is unwrapped around '
+            f'{r["MAPLCEN"]:.2f} deg (MAPLCEN). A different registration gives different columns; the default is only a '
+            'starting point and must be checked against the data.']
 
 
 def _one_based(a: np.ndarray) -> np.ndarray:
@@ -103,24 +141,32 @@ def selection_columns(ds: TagDataset, times: TimeTable | None, regions: RegionTa
     needed = regions.used_frames
     region_bits = np.zeros(n, dtype=np.uint16) if regions else None
     corrected = bool(corr.randcorr or corr.geocorr)
-    todo = list(dict.fromkeys(list(needed) + ['image'] + list(POSITION_COLUMNS)))
+    todo = list(dict.fromkeys(list(needed) + ['image'] + list(POSITION_COLUMNS) + ['map_rect']))
     for f in todo:
         try:
             if f != 'image':
                 ds.prepare_frame(f)
-            u, v = _positions(ds, f, corr)
+            u, v = _map_positions(ds, f, corr) if is_map(f) else _positions(ds, f, corr)
         except Exception as exc:   # an unavailable frame (ValueError), or Horizons not reachable
             if f in needed:
                 raise RuntimeError(f'a region was drawn in the {frame_label(ds.frame_info, f)}, which cannot be '
                                    f'built: {exc}') from exc
+            if is_map(f) and ds.frame_info.unavailable_reason(f):
+                continue      # not a Jupiter or Saturn exposure: nothing was expected, so nothing is reported as left out
             if north_up or not is_north(f):
                 out.skipped.append((frame_label(ds.frame_info, f), str(exc)))
             continue
-        x1, y1 = _one_based(u), _one_based(v)    # what the position columns hold; the regions are tested on these
+        if is_map(f):    # degrees as they are (a region on a map is not shifted by one), NaN: off the planet
+            x1, y1 = u, v
+        else:
+            x1, y1 = _one_based(u), _one_based(v)    # what the position columns hold; the regions are tested on these
         del u, v
         for row in regions.primitives:
             if row.frame == f:
-                region_bits[np.asarray(row.region.contains(x1, y1), dtype=bool)] |= np.uint16(row.mask)
+                inside = np.asarray(row.region.contains(x1, y1), dtype=bool)
+                if is_map(f):
+                    inside &= np.isfinite(x1) & np.isfinite(y1)      # (events that miss the planet are in no region)
+                region_bits[inside] |= np.uint16(row.mask)
                 out.history.append(f'SEL_REGION bit {row.bit} ({row.name}): set for events inside this region of the '
                                    f'{frame_label(ds.frame_info, f)}, tested at each event\'s own position as written '
                                    f'in the position columns: {row.region.describe()}')
@@ -132,6 +178,14 @@ def selection_columns(ds: TagDataset, times: TimeTable | None, regions: RegionTa
                                                          ('geometric distortion', corr.geocorr)) if on)
                 out.history.append('XCORR, YCORR: the image-frame position' +
                                    (f' with {what} applied' if what else ' (no correction applied)'))
+        elif is_map(f):
+            if f == 'map_rect' or f in needed:
+                positions[MAP_COLUMNS[f][0]], positions[MAP_COLUMNS[f][1]] = x1, y1
+                where = {'map_rect': 'west longitude (unwrapped around the map centre) and planetographic latitude',
+                         'map_north': 'x and y in the north polar map plane (degrees of colatitude)',
+                         'map_south': 'x and y in the south polar map plane (degrees of colatitude)'}[f]
+                out.history.append(f'{MAP_COLUMNS[f][0]}, {MAP_COLUMNS[f][1]}: {where}, in degrees, on the emission surface '
+                                   '(experimental); NaN where the event misses the planet')
         elif north_up or not is_north(f) or f in needed:
             xname, yname = POSITION_COLUMNS[f]
             positions[xname], positions[yname] = x1, y1
@@ -141,8 +195,12 @@ def selection_columns(ds: TagDataset, times: TimeTable | None, regions: RegionTa
     if regions:
         flags['SEL_REGION'] = region_bits
     # Always the same order (XCORR, YCORR, then the frames as listed in POSITION_COLUMNS), whichever frame was built first.
-    order = ['XCORR', 'YCORR'] + [name for pair in POSITION_COLUMNS.values() for name in pair]
+    order = (['XCORR', 'YCORR'] + [name for pair in POSITION_COLUMNS.values() for name in pair]
+             + [name for pair in MAP_COLUMNS.values() for name in pair])
     positions = {name: positions[name] for name in order if name in positions}
+    if any(name in positions for pair in MAP_COLUMNS.values() for name in pair):
+        out.history += map_history(ds, corr)
+        out.map_registration = map_registration(ds, corr)
     valid = ds.valid_events(corr)
     if valid is not None:
         flags['EDGE_OK'] = np.array(valid, dtype=bool)
@@ -275,8 +333,8 @@ def column_definition(name: str, values: np.ndarray):
         return fits.Column(name=name, format='I', bzero=32768, array=values)
     if values.dtype == bool:
         return fits.Column(name=name, format='L', array=values)
-    return fits.Column(name=name, format='E', array=values.astype(np.float32),
-                       unit='pixel' if name[0] in 'XY' else None)
+    unit = 'pixel' if name[0] in 'XY' else 'deg' if name.startswith('MAP') else None
+    return fits.Column(name=name, format='E', array=values.astype(np.float32), unit=unit)
 
 
 TABLE_UNITS = {'TSTART': 's', 'TSTOP': 's', 'PARAMS': 'pixel'}
@@ -319,7 +377,7 @@ def read_selections(path) -> Selections:
 
 # The primary-header keywords are this tool's own (prefix TTE), never the calibration pipeline's step keywords
 # (RANDCORR, FLATCORR ... mean PERFORM/OMIT/COMPLETE to calstis and stistools), so later processing is unaffected.
-STEP_KEYWORDS = ('TTERAND', 'TTEGEO', 'TTEFLAT', 'TTEVIGN', 'TTEEDGE')   # DONE or OMIT
+STEP_KEYWORDS = ('TTERAND', 'TTEGEO', 'TTEFLAT', 'TTEVIGN', 'TTEEDGE', 'TTEMAP')   # DONE or OMIT
 KEYWORD_GROUP = 'TIMETAG-EXPLORER KEYWORDS'                                # the label above the block, `/ TIMETAG-EXPLORER KEYWORDS`
 
 
@@ -332,10 +390,11 @@ def primary_keywords(times: TimeTable, regions: RegionTable, corr: Corrections, 
     library."""
     from . import __version__
     done = {'TTERAND': bool(corr.randcorr), 'TTEGEO': bool(corr.geocorr), 'TTEFLAT': 'FLATW' in columns.arrays,
-            'TTEVIGN': 'VIGW' in columns.arrays, 'TTEEDGE': 'EDGE_OK' in columns.arrays}
+            'TTEVIGN': 'VIGW' in columns.arrays, 'TTEEDGE': 'EDGE_OK' in columns.arrays,
+            'TTEMAP': bool(columns.map_registration)}
     what = {'TTERAND': 'random sub-pixel offset', 'TTEGEO': 'geometric distortion',
             'TTEFLAT': 'flat-field weights FLATW', 'TTEVIGN': 'vignetting model VIGW',
-            'TTEEDGE': 'edge-trim flag EDGE_OK'}   # (short: a FITS card holds 80 characters, value included)
+            'TTEEDGE': 'edge-trim flag EDGE_OK', 'TTEMAP': 'planet-map columns MAP... (experimental)'}   # (short: a FITS card holds 80 characters, value included)
     keys = [(key, 'DONE' if done[key] else 'OMIT', what[key]) for key in STEP_KEYWORDS]
     if done['TTEFLAT']:
         keys.append(('TTEFFILE', config.FLAT_FILE.name, 'flat-field file used for FLATW'))
@@ -350,6 +409,12 @@ def primary_keywords(times: TimeTable, regions: RegionTable, corr: Corrections, 
                  ('VIGTSTRT', float(corr.vigtop_start), '[pix] top ramp starts at this row (0-indexed)'),
                  ('VIGTEND', float(corr.vigtop_end), '[pix] top ramp: row where the loss is reached'),
                  ('VIGTLOSS', float(corr.vigtop_loss), 'top ramp: fractional loss at that row')]
+    if done['TTEMAP']:
+        r = columns.map_registration
+        keys += [('MAPDX', r['MAPDX'], '[pix] planet-centre offset in x, hi-res pixels'),
+                 ('MAPDY', r['MAPDY'], '[pix] planet-centre offset in y, hi-res pixels'),
+                 ('MAPALT', r['MAPALT'], '[km] emission altitude of the map projection'),
+                 ('MAPLCEN', r['MAPLCEN'], '[deg] centre longitude of MAPLON (west)')]
     if done['TTEEDGE']:
         keys += [(key, pixels, f'[pix] EDGE_OK trim of the {side} edge') for key, side, pixels in (
             ('SELEDGEL', 'left', EDGE_TRIM.left), ('SELEDGER', 'right', EDGE_TRIM.right),
@@ -374,13 +439,14 @@ def make_tagsel(rootname: str, *, times=None, regions=None, corr: Corrections, s
 
     `times` and `regions` are the named selections (a `TimeTable` / `RegionTable`, or a list of `TimeRange` /
     `RegionSelection`), the regions in file coordinates (hi-res pixels counted from 1). Anything wrong with them, such as
-    a region on a planet map (not supported), stops the script here, before anything is downloaded or written; so does a
-    region whose frame cannot be built. Refuses to replace an existing output unless `overwrite`. Needs a network
+    a region on a planet map with no planet in the exposure, stops the script here, before anything is downloaded or
+    written; so does a region whose frame cannot be built. Regions on planet maps (experimental) are written in degrees
+    and tested on the `MAP...` columns, which depend on `corr`'s planet registration (`centre_dx`, `centre_dy`,
+    `altitude_km`). Refuses to replace an existing output unless `overwrite`. Needs a network
     connection for files that are not in `folder` yet (MAST, the flat field) and, for planet frames, for JPL Horizons.
     """
     from . import __version__
     times, regions = _as_table(times, TimeTable), _as_table(regions, RegionTable)   # (checks them)
-    regions.require_file_frames()     # (a region on a planet map stops the script here)
     folder = Path(folder).resolve()
     folder.mkdir(parents=True, exist_ok=True)
     if not os.environ.get('TAG_EXPLORER_FLAT'):

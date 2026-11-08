@@ -134,10 +134,9 @@ assert regions.frames('oval') == ('rest',) and regions.frames('outside') == ('re
 assert [r.name for r in regions.leaves('outside')] == ['oval', 'io'] and regions.leaves(1)[0].name == 'io'
 flags = np.array([0, 1, 2, 3], dtype=np.uint16)
 assert regions.mask(flags, 'outside').tolist() == [False, True, False, False]                # oval and not io
-# a planet-map region is allowed in a table (the Explorer holds them), but not yet in a file
+# a planet-map region is allowed in a table and in a file (its coordinates go in the MAP columns)
 maprow = RegionTable([RegionSelection(name='m', region=Box(0, 1, 0, 1), frame='map_rect'), RegionSelection(name='i', region=Box(0, 1, 0, 1), frame='image')])
-refused(maprow.require_file_frames, 'maps are not supported')
-RegionTable([RegionSelection(name='i', region=Box(0, 1, 0, 1), frame='image')]).require_file_frames()
+assert maprow.used_frames == ('map_rect', 'image') and not hasattr(maprow, 'require_file_frames')
 refused(lambda: RegionTable([RegionSelection(name='m', region=Box(0, 1, 0, 1), frame='nowhere')]), 'unknown reference frame')
 # degrees are not counted from 1: a map region is not shifted, a pixel region is
 degrees = RegionSelection.from_array(Box(10.0, 20.0, -5.0, 5.0), 'map_rect', name='d')

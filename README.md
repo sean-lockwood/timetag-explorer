@@ -99,8 +99,7 @@ TIME-TAG Explorer, including this science code, was built with AI assistance: th
 Anthropic's AI model (mainly Claude Sonnet 5.5), under human direction. It was developed iteratively, deployed
 continuously, and checked against expected results at each step. Snippets of previously validated algorithms served as
 references for the scientific steps, such as the corrections and reference frame transformations. Features still under
-review, including the planet maps, planet registration, and script generation, are marked *experimental*. Script
-generation has not yet been tested by the author. Please check any result you plan to publish against your own
+review, including the planet maps and planet registration, are marked *experimental*. Please check any result you plan to publish against your own
 analysis. Report problems as [issues](https://github.com/sean-lockwood/timetag-explorer/issues).
 
 ## Citing

@@ -19,7 +19,8 @@ from pathlib import Path
 from . import __version__, config
 from .constants import DEFAULT_TOOL_URL, EDGE_TRIM, RANDOM_SEED, SELECTION_SCRIPT_VERSION, TIME_DECIMALS, TimeSel
 from .dataset import TagDataset
-from .frames import Corrections, frame_label, is_map
+from .frames import Corrections, frame_label
+from .planet import BODIES
 from .regions import Region, region_source
 from .selections import RegionTable, TimeTable, single_selections
 from .tagsel import EDGE_TRIM_TEXT
@@ -112,13 +113,20 @@ def pip_command(spec: str) -> str:
 
 
 def _corrections_source(ds: TagDataset, corr: Corrections) -> str:
-    """`Corrections(...)` with the switches that matter for a script (the planet-map offsets do not)."""
+    """`Corrections(...)` with the switches that matter for a script, and, for an observation of a planet (the exposure
+    has planet-map columns), the planet registration they were made with: the emission altitude always (so the script
+    keeps its numbers if the default changes), the centre offsets when they are not zero."""
     args = [f'randcorr={bool(corr.randcorr)}', f'geocorr={bool(corr.geocorr)}', f'flatcorr={bool(corr.flatcorr)}',
             f'timecorr={bool(corr.timecorr)}']
     if corr.vigcorr and ds.vignette_applies():
         args.append('vigcorr=True')
         for name in ('vigbot_start', 'vigbot_end', 'vigbot_loss', 'vigtop_start', 'vigtop_end', 'vigtop_loss'):
             args.append(f'{name}={float(getattr(corr, name))!r}')
+    if ds.frame_info.unavailable_reason('map_rect') is None:
+        if corr.centre_dx or corr.centre_dy:
+            args += [f'centre_dx={float(corr.centre_dx)!r}', f'centre_dy={float(corr.centre_dy)!r}']
+        altitude = corr.altitude_km if corr.altitude_km is not None else BODIES[ds.frame_info.body].altitude_km
+        args.append(f'altitude_km={float(altitude)!r}')
     return 'Corrections(' + ', '.join(args) + ')'
 
 
@@ -149,15 +157,10 @@ def build_selection_script(ds: TagDataset, time_sel: TimeSel | None, region: Reg
     """The script for the Explorer's current selection: one time window and one region, the region as drawn on the
     Explorer's 0-indexed arrays (it is moved to the file's coordinates, hi-res pixels counted from 1). The time range is
     named `T1` and the region `R1`. See `build_selections_script` for any number of named selections.
-    Regions drawn on planet maps (not supported yet) are not carried over, and a warning says so."""
-    warnings = []
-    if region is not None and is_map(frame):
-        warnings.append(f'The region was drawn on a planet map ({frame_label(ds.frame_info, frame)}), which is not '
-                        'supported yet: the script contains the time selection and the other columns, but no region flag.')
-        region = None
+    A region drawn on a planet map (experimental) is carried over in degrees, with the planet registration it was drawn
+    with."""
     times, regions = single_selections(time_sel, region, frame)
-    script = build_selections_script(ds, corr, times, regions)
-    return replace(script, warnings=tuple(warnings) + script.warnings)
+    return build_selections_script(ds, corr, times, regions)
 
 
 def build_selections_script(ds: TagDataset, corr: Corrections, times: TimeTable | None = None,
@@ -173,7 +176,6 @@ def build_selections_script(ds: TagDataset, corr: Corrections, times: TimeTable 
     """
     times = times if times is not None else TimeTable()
     regions = regions if regions is not None else RegionTable()
-    regions.require_file_frames()       # (a region on a planet map is not supported in a file yet)
     root = (ds.rootname or ds.name.split('_')[0]).lower()
     url = tool_url()
     version = SELECTION_SCRIPT_VERSION
@@ -223,7 +225,15 @@ def build_selections_script(ds: TagDataset, corr: Corrections, times: TimeTable 
                  '(target rest frame) and, for moon observations, `XPLAN`/`YPLAN` (planet rest frame). The north-up '
                  'versions (`XRESTN`/`YRESTN`, `XPLANN`/`YPLANN`) make the file much larger, so they are left out unless '
                  'you set `INCLUDE_NORTH_UP = True` in the script or a region was drawn in one. The planet frames need '
-                 'JPL Horizons ephemerides (a network connection). Planet maps are not supported.')
+                 'JPL Horizons ephemerides (a network connection).')
+    if ds.frame_info.unavailable_reason('map_rect') is None:
+        notes.append('Planet maps (experimental): `MAPLON`/`MAPLAT` are the west longitude (unwrapped around the map centre '
+                     '`MAPLCEN`, so it can lie outside 0 to 360) and the planetographic latitude, in degrees, of the point '
+                     'on the emission surface each event is seen at (NaN for events that miss the planet). The polar maps, '
+                     '`MAPNX`/`MAPNY` and `MAPSX`/`MAPSY`, are written only when a region was drawn in one. They depend on '
+                     'the planet registration, so `CORRECTIONS` carries the centre offsets and the emission altitude '
+                     'the Explorer had (the primary header records them as `MAPDX`, `MAPDY`, `MAPALT`). The default '
+                     'registration is only a starting point: check it against the data before trusting a region on a map.')
     if weights:
         notes.append('Weights: ' + ', '.join(f'`{w}`' for w in weights) + '. There is no combined weight column: an '
                      'event counts as the product of the weights that exist (`FLATW` is the flat field at the '
