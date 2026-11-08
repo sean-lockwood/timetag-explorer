@@ -136,6 +136,8 @@ def _selection_source(row, kind: str) -> str:
     parts.append(f'color={row.color!r}')
     if not row.visible:
         parts.append('visible=False')
+    if kind != 'time' and not row.curve:
+        parts.append('curve=False')
     if row.note:
         parts.append(f'note={row.note!r}')
     cls = 'TimeRange' if kind == 'time' else 'RegionSelection'
@@ -171,6 +173,7 @@ def build_selections_script(ds: TagDataset, corr: Corrections, times: TimeTable 
     """
     times = times if times is not None else TimeTable()
     regions = regions if regions is not None else RegionTable()
+    regions.require_file_frames()       # (a region on a planet map is not supported in a file yet)
     root = (ds.rootname or ds.name.split('_')[0]).lower()
     url = tool_url()
     version = SELECTION_SCRIPT_VERSION

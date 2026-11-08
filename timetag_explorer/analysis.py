@@ -145,3 +145,18 @@ def region_stats(ds: TagDataset, regions: RegionTable, key, corr: Corrections, t
     seen = emap[inside]
     return RegionStats(frame, float(inside.sum()) * SPATIAL_BIN ** 2, float(seen.mean()), float(seen.min()),
                        float(seen.max()))
+
+
+def curve_peak(rate) -> float:
+    """The normalization factor of a light curve: its largest finite rate, or 1 if there is none above zero."""
+    rate = np.asarray(rate, dtype=float)
+    finite = rate[np.isfinite(rate)]
+    peak = float(finite.max()) if finite.size else 0.0
+    return peak if peak > 0 else 1.0
+
+
+def normalized_curve(rate) -> tuple:
+    """(rate / peak, peak): a light curve scaled to a maximum of 1, and the factor that did it, so curves of very
+    different brightness can share an axis. Gaps (NaN) stay gaps."""
+    peak = curve_peak(rate)
+    return np.asarray(rate, dtype=float) / peak, peak

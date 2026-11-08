@@ -20,6 +20,7 @@ from .horizons import (PlanetTrack, load_horizons_positions, planet_track_from_o
                        sky_offsets_from_positions)
 from .log import logger
 from .regions import Region
+from .selections import Intervals, RegionTable
 from .transforms import (FrameGrid, PlanetGeometry, build_planet_geometry, compute_exposure_map, load_geo_lut,
                          make_frame_grid, map_exposure_from_knots, map_knots)
 from .vignette import event_gain
@@ -29,6 +30,16 @@ from .vignette import event_gain
 # --------------------------------------------------------------------------
 # Data layer (no UI, no matplotlib)
 # --------------------------------------------------------------------------
+
+def time_windows(time_sel) -> list:
+    """The time selection as separate, sorted (start, stop) windows in seconds: None is the whole exposure (-inf, inf), a
+    (start, stop) pair is one window, and a list of pairs (or an `Intervals`) is several, with overlapping ones merged
+    and empty ones dropped."""
+    if time_sel is None:
+        return [(-np.inf, np.inf)]
+    rows = time_sel.rows if isinstance(time_sel, Intervals) else np.asarray(time_sel, dtype=float).reshape(-1, 2)
+    return [(float(a), float(b)) for a, b in Intervals(rows).rows]
+
 
 @dataclass(eq=False)
 class TagDataset:
@@ -125,6 +136,12 @@ class TagDataset:
             else:
                 self._grids.move_to_end(key)
             return grid
+
+    def has_grid(self, frame: str) -> bool:
+        """True if this frame's bin grid is already built (a grid keeps an index per event in memory, so a frame that
+        has none yet would cost that much more the first time it is used)."""
+        with self._lock:
+            return any(key[0] == frame for key in self._grids)
 
     def exposure(self, t0: float = -np.inf, t1: float = np.inf) -> float:
         """Good exposure time (s) inside [t0, t1]: only time within a GTI row counts."""
@@ -288,9 +305,22 @@ class TagDataset:
             mask &= grid.keep
         return mask
 
+    def selection_mask(self, regions: RegionTable, key, corr: Corrections = DEFAULT_CORRECTIONS) -> np.ndarray:
+        """Per-event boolean mask for a row of a `RegionTable`, by name or bit position.
+
+        A drawn region is tested in the frame it was drawn in (see `region_mask`); a row made from others (`oval - io`)
+        combines those masks event by event, so its regions may be in different frames: the events are the same
+        whichever frame is displayed. Every frame the row uses is prepared first (`prepare_frame`; it may use the
+        network, and raises ValueError with a reason if a frame cannot be built)."""
+        for frame in regions.frames(key):
+            self.prepare_frame(frame)
+        return regions.evaluate(key, lambda row: self.region_mask(row.for_array(), row.frame, corr))
+
     def light_curve(self, binsize: float, region: Region | None = None,
-                    frame: str = 'image', corr: Corrections = DEFAULT_CORRECTIONS):
-        """Return (bin edges, count rate). Optionally restricted to a region.
+                    frame: str = 'image', corr: Corrections = DEFAULT_CORRECTIONS,
+                    event_mask: np.ndarray | None = None):
+        """Return (bin edges, count rate). Optionally restricted to a region, or to the events of `event_mask` (a boolean
+        per event, e.g. from `selection_mask`; with a region too, to the events in both).
 
         Rates divide by the *good* exposure in each bin (GTI), so a bin that
         straddles a gap is normalised correctly and a bin entirely inside a
@@ -303,7 +333,7 @@ class TagDataset:
         edges = np.arange(nbins + 1) * binsize
         weighted = self._weighted(corr)
         valid = self.valid_events(corr)
-        if region is None:
+        if region is None and event_mask is None:
             # Sorted times: the histogram is the difference of the running
             # sum (of events, or of weights) at the bin edges.
             idx = np.searchsorted(self.time, edges)
@@ -312,7 +342,9 @@ class TagDataset:
             else:
                 counts = np.diff(idx)
         else:
-            mask = self.region_mask(region, frame, corr)
+            mask = self.region_mask(region, frame, corr) if region is not None else np.array(event_mask, dtype=bool)
+            if region is not None and event_mask is not None:
+                mask &= event_mask
             if valid is not None:
                 mask &= valid
             # float64 weights: np.histogram accumulates in the weights' dtype,
@@ -329,8 +361,13 @@ class TagDataset:
         return edges, rate
 
     def image(self, time_sel: TimeSel | None = None, frame: str = 'image',
-              corr: Corrections = DEFAULT_CORRECTIONS) -> np.ndarray:
+              corr: Corrections = DEFAULT_CORRECTIONS, event_mask: np.ndarray | None = None) -> np.ndarray:
         """Count-rate image (ny, nx) in a frame.
+
+        `time_sel` is None (all times), a (start, stop) pair, or several windows (a list of pairs or an `Intervals`):
+        the events of all of them are counted, over their total good exposure. `event_mask` (a boolean per event, e.g.
+        from `selection_mask`) keeps only those events, whatever frame they were selected in; see `filter_exposure_map`
+        for how the exposure is treated then.
 
         With the exposure-time correction, events in the vignetted border of the
         detector are discarded and each bin is divided by the time it was on the
@@ -339,36 +376,55 @@ class TagDataset:
         left at 0. Without it, every bin is divided by the total good exposure.
         """
         grid = self.grid(frame, corr)
-        start, stop, _ = self.time_slice(time_sel).indices(len(self.time))
+        windows = time_windows(time_sel)
         weighted = self._weighted(corr)
         keep = self.valid_events(corr)       # the trimmed detector border (exposure-time correction)
         if grid.keep is not None:            # maps: only events that land on the planet
             keep = grid.keep if keep is None else keep & grid.keep
+        if event_mask is not None:
+            keep = np.asarray(event_mask, dtype=bool) if keep is None else keep & event_mask
         counts = np.zeros(grid.nx * grid.ny)
-        for lo in range(start, stop, EVENT_CHUNK):  # a chunk at a time: bincount copies its inputs to int64 / float64
-            hi = min(lo + EVENT_CHUNK, stop)
-            w = self._event_weights(corr, lo, hi) if weighted else None
-            if keep is not None:  # a zero weight discards the event
-                w = keep[lo:hi].astype(np.float64) if w is None else w * keep[lo:hi]
-            counts += np.bincount(grid.bin_index[lo:hi], weights=w, minlength=grid.nx * grid.ny)
-        t0, t1 = (-np.inf, np.inf) if time_sel is None else time_sel
-        total = self.exposure(t0, t1)
+        for t0, t1 in windows:
+            first, last = np.searchsorted(self.time, (t0, t1))
+            for lo in range(int(first), int(last), EVENT_CHUNK):  # a chunk at a time: bincount copies its inputs to int64 / float64
+                hi = min(lo + EVENT_CHUNK, int(last))
+                w = self._event_weights(corr, lo, hi) if weighted else None
+                if keep is not None:  # a zero weight discards the event
+                    w = keep[lo:hi].astype(np.float64) if w is None else w * keep[lo:hi]
+                counts += np.bincount(grid.bin_index[lo:hi], weights=w, minlength=grid.nx * grid.ny)
+        total = sum(self.exposure(t0, t1) for t0, t1 in windows)
         if total <= 0:
             return np.zeros((grid.ny, grid.nx))
         if is_map(frame):
             # Brightness per 4x4 hi-res pixels: counts over the pixel-seconds that saw each bin.
-            pixel_seconds, full = self.map_exposure(time_sel, frame, corr)
+            parts = [self.map_exposure((t0, t1), frame, corr) for t0, t1 in windows]
+            pixel_seconds = sum(p[0] for p in parts) if len(parts) > 1 else parts[0][0]
+            full = sum(p[1] for p in parts) if len(parts) > 1 else parts[0][1]
             denom = (pixel_seconds if corr.timecorr else full).ravel()
             ok = (full.ravel() > 0) & (denom >= TIME_CORR_MIN_FRACTION * full.ravel())
             rate = np.divide(counts * SPATIAL_BIN ** 2, denom, out=np.zeros(counts.shape), where=ok)
             return rate.reshape(grid.ny, grid.nx)
         if corr.timecorr:
-            emap = self.exposure_map(time_sel, frame, corr).ravel()
+            maps = [self.exposure_map((t0, t1), frame, corr) for t0, t1 in windows]
+            emap = (sum(maps) if len(maps) > 1 else maps[0]).ravel()
+            if event_mask is not None:
+                emap = self.filter_exposure_map(emap, event_mask, time_sel, frame, corr)
             rate = np.divide(counts, emap, out=np.zeros(counts.shape),
                              where=emap >= TIME_CORR_MIN_FRACTION * total)
         else:
             rate = counts / total
         return rate.reshape(grid.ny, grid.nx)
+
+    def filter_exposure_map(self, emap: np.ndarray, event_mask: np.ndarray, time_sel, frame: str,
+                            corr: Corrections) -> np.ndarray:
+        """The exposure (per bin, flattened) that a filtered image is divided by.
+
+        STUB. Today this is `emap` unchanged: the exposure the bin got with every event allowed, so a filtered image shows
+        the count rate those events contribute per bin, and the filter's own exposure is not accounted for. When the filter
+        was defined in another frame the effective exposure of a bin depends on how the filter moved across the detector
+        during the exposure; computing that belongs here (the arguments say what it would need). The same limitation
+        holds for the image without the exposure-time correction, which divides by the total good time."""
+        return emap
 
 
 def _as_float(value) -> float | None:

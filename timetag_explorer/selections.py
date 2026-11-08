@@ -36,13 +36,14 @@ def as_ascii(text: str) -> str:
 
 # ---- expressions ---------------------------------------------------------------------------------------------------
 
-_TOKEN = re.compile(r'\s*(?:([A-Za-z][A-Za-z0-9_]*)|([|&\-~()]))')
+_TOKEN = re.compile(r'\s*(?:([A-Za-z][A-Za-z0-9_]*)|([|&^\-~()]))')
 
 
 def parse_expression(text: str):
-    """Parse `A | B`, `A & B`, `A - B` (A and not B), `~A` and parentheses into a tree of tuples:
-    ('name', 'A'), ('not', x), ('and', x, y), ('or', x, y), ('sub', x, y).
-    Precedence: `~`, then `&` and `-` (left to right), then `|`. Raises ValueError for anything else; never uses eval."""
+    """Parse `A | B`, `A & B`, `A ^ B` (in one or the other, not both), `A - B` (A and not B), `~A` and parentheses into a
+    tree of tuples: ('name', 'A'), ('not', x), ('and', x, y), ('or', x, y), ('xor', x, y), ('sub', x, y).
+    Precedence: `~`, then `&` and `-` (left to right), then `^`, then `|` (as in Python). Raises ValueError for anything
+    else; never uses eval."""
     tokens, pos = [], 0
     text = str(text)
     while pos < len(text):
@@ -65,10 +66,17 @@ def parse_expression(text: str):
         return tokens[at[0] - 1]
 
     def or_expr():
-        left = and_expr()
+        left = xor_expr()
         while peek() == '|':
             take()
-            left = ('or', left, and_expr())
+            left = ('or', left, xor_expr())
+        return left
+
+    def xor_expr():
+        left = and_expr()
+        while peek() == '^':
+            take()
+            left = ('xor', left, and_expr())
         return left
 
     def and_expr():
@@ -111,7 +119,7 @@ def expression_names(tree) -> list:
 
 
 class _Logic:
-    """How `&`, `|` and `~` combine masks (boolean arrays)."""
+    """How `&`, `|` and `~` combine masks (boolean arrays); `^` and `-` are made from these."""
     @staticmethod
     def and_(a, b): return np.logical_and(a, b)
     @staticmethod
@@ -211,15 +219,19 @@ class RegionSelection(_Selection):
     """Events inside `region`, drawn in `frame`; coordinates in file coordinates (hi-res pixels counted from 1)."""
     region: Region | None = None
     frame: str = ''
+    curve: bool = True       # the Explorer also draws this region's light curve; with `visible` (its overlay) that gives
+                             # four display states: off, curve only, overlay only, on. Not needed outside the Explorer.
 
     @classmethod
     def from_array(cls, region: Region, frame: str, *, name: str = '', **kwargs) -> 'RegionSelection':
-        """A region as the Explorer draws it, on 0-indexed arrays, moved to the file's coordinates (+1)."""
-        return cls(name=name, region=shift_region(region, 1.0), frame=frame, **kwargs)
+        """A region as the Explorer draws it, on 0-indexed arrays, moved to the file's coordinates (+1). A region on a
+        planet map is in degrees, which are not counted from 1, so it is not moved."""
+        return cls(region=region if is_map(frame) else shift_region(region, 1.0), frame=frame, name=name, **kwargs)
 
     def for_array(self) -> Region:
-        """The region on 0-indexed arrays (-1), for code that works on the Explorer's grids."""
-        return shift_region(self.region, -1.0)
+        """The region on 0-indexed arrays (-1), for code that works on the Explorer's grids (a planet-map region is in
+        degrees and is returned as it is)."""
+        return self.region if is_map(self.frame) else shift_region(self.region, -1.0)
 
     def check(self):
         if self.derived:
@@ -228,12 +240,8 @@ class RegionSelection(_Selection):
             return
         if self.region is None:
             raise ValueError(f'region {self.name!r} has no shape')
-        if is_map(self.frame):
-            raise ValueError(f'region {self.name!r} was drawn on a planet map ({self.frame}); maps are not supported '
-                             'yet, because they need an accurate planet registration')
-        if self.frame not in SELECTABLE_FRAMES:
-            raise ValueError(f'region {self.name!r}: unknown reference frame {self.frame!r}' if self.frame not in FRAMES
-                             else f'region {self.name!r}: frame {self.frame!r} cannot be selected')
+        if self.frame not in FRAMES:
+            raise ValueError(f'region {self.name!r}: unknown reference frame {self.frame!r}')
 
 
 def region_params(region: Region) -> tuple[str, list]:
@@ -374,6 +382,8 @@ class SelectionTable:
                 return logic.and_(a, b)
             if tree[0] == 'or':
                 return logic.or_(a, b)
+            if tree[0] == 'xor':
+                return logic.or_(logic.and_(a, logic.not_(b)), logic.and_(logic.not_(a), b))
             return logic.and_(a, logic.not_(b))     # 'sub'
         return walk(parse_expression(row.expr))
 
@@ -424,6 +434,14 @@ class TimeTable(SelectionTable):
     def intervals(self, key) -> Intervals:
         """The set of time intervals (seconds since the exposure start) a time range covers."""
         return self.evaluate(key, lambda r: Intervals([[r.start, r.stop]]), _IntervalLogic)
+
+    def union(self, keys) -> Intervals:
+        """The time intervals covered by any of the time ranges `keys` (names or bit positions): what an image of several
+        selected times counts. No keys give an empty set."""
+        covered = Intervals()
+        for key in keys:
+            covered = covered | self.intervals(key)
+        return covered
 
     def window(self, key) -> tuple[float, float]:
         """(first start, last stop) of the intervals: the span a plot of this selection should cover."""
@@ -478,7 +496,7 @@ class RegionTable(SelectionTable):
         return {**self._common_columns(), 'FRAME': [as_ascii(r.frame) for r in self.rows],
                 'SHAPE': [s for s, _ in shapes], 'PARAMS': params,
                 'DESCR': [as_ascii(r.region.describe()) if r.region is not None else '' for r in self.rows],
-                **self._tail_columns()}
+                **self._tail_columns(), 'CURVE': np.array([r.curve for r in self.rows], dtype=bool)}
 
     @classmethod
     def from_columns(cls, cols) -> 'RegionTable':
@@ -491,8 +509,17 @@ class RegionTable(SelectionTable):
                 name=str(cols['NAME'][i]).strip(), note=str(cols['NOTE'][i]).strip(), bit=int(cols['BIT'][i]),
                 frame=str(cols['FRAME'][i]).strip(), expr=expr, color=str(cols['COLOR'][i]).strip(),
                 region=None if expr else region_from_params(shape, cols['PARAMS'][i]),
-                visible=bool(cols['VISIBLE'][i])))
+                visible=bool(cols['VISIBLE'][i]),
+                curve=bool(cols['CURVE'][i]) if 'CURVE' in cols else True))     # (files from before 3.1 have no CURVE)
         return cls(rows)
+
+    def require_file_frames(self) -> None:
+        """Raise ValueError if a region was drawn on a planet map. The Explorer's tables can hold those, but the position
+        columns of a selection file cannot yet (a map needs an accurate planet registration first)."""
+        maps = [r for r in self.primitives if is_map(r.frame)]
+        if maps:
+            raise ValueError('maps are not supported yet: ' + ', '.join(f'region {r.name!r} was drawn on a planet map '
+                             f'({r.frame})' for r in maps) + '; they need an accurate planet registration first')
 
 
 @dataclass(frozen=True)
