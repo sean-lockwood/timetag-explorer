@@ -17,7 +17,7 @@ How to read the columns:
 | 2 | Good exposure from the GTI table; light-curve bins with gaps | `dataset.TagDataset.exposure`, `.light_curve` | the `GTI` extension of the TIME-TAG file | `test_dataset` | not reviewed |
 | 3 | Flat-field weighting (custom grid-wire flat, sampled on the detector grid) | `dataset.load_flat_weights` | [How the flat was made](https://www.planetarylightshow.com/aurora_processing.html#Flat-Fielding) | `test_dataset` (weights multiply counts) | not reviewed |
 | 4 | Random sub-pixel offset (removes the integer-position grid pattern) | `transforms.frame_coordinates` | the usual "randomise within the pixel" practice | `test_dataset` (total kept, repeatable) | not reviewed |
-| 5 | **Geometric distortion** | `gdcorr`, `transforms.load_geo_lut` | a public STIS FUV reference file (to come) | `test_gdcorr` | **disabled in 1.0.0** (placeholder coefficients) |
+| 5 | **Geometric distortion** | `gdcorr`, `transforms.load_geo_lut` | the STIS IDC table `1771408ro_idc.fits` (FORWARD rows, bundled; polynomial as in STIS ISR 2018-02 and the table header), applied as an offset on hi-res pixels (2 x the low-res offset; hi-res pixel *i* is low-res pixel *i*/2 + 0.75) | `test_gdcorr` (coefficients equal ISR Table 3; ordering; a direct evaluation; the INVERSE rows undo the forward polynomial to 0.02 pixel; the offset does not depend on the reference-pixel convention at the table's accuracy), `test_selection_script` (written XCORR/YCORR equal the lookup table; `TTEGFILE`) | not reviewed |
 | 6 | Exposure-time correction and the detector-edge trim (left 30, right 6, bottom 28, top 6 pixels) | `dataset.TagDataset.exposure_map`, `transforms.compute_exposure_map` | an empirical choice for the vignetted border (from exposure ODDS22A8Q, which fills the field of view with external light) | `test_dataset` (trim on and off, each side, the exposure map), `test_selection_script` (EDGE_OK equals the Explorer's mask) | not reviewed |
 | 6a | **Vignetting model (experimental, off by default, F25SRF2 only)**: two linear sensitivity ramps (bottom, top) divided out after the geometric step | `vignette`, `dataset.TagDataset._event_weights` | empirical (exposure ODDS22A8Q); the values are still under study | `test_vignette` (ramp values, both ramps, other apertures untouched, geometric step first, cache invalidation) | not reviewed |
 | 7 | Target rest frames: removal of the commanded slew, rotation by ORIENTAT for north-up | `transforms.frame_shift`, `frames.load_frame_info` | the SPT file's motion-tracking (`MT_LV`) levels; HST pointing keywords | `test_frames` (header parsing) | not reviewed |
@@ -32,7 +32,7 @@ How to read the columns:
 
 ## Known gaps
 
-* Step 5 is disabled, so nothing about the distortion correction is validated or used.
+* Step 5 is checked against the table and the ISR, not against sky data (for example, a field of stars before and after). The two optical elements share coefficients but not `SCALE`, so their corrections differ by about 0.3%; the row is chosen by `OPT_ELEM` (MIRFUV if there is no match).
 * Steps 7, 8 and 12 have no known-answer test yet; they are only exercised end to end.
 * Step 14 reads and writes FITS files, which the quick tests do not do (they run without astropy's file I/O):
   the weekly `check_selection_scripts.py` run on a real exposure is what covers it.

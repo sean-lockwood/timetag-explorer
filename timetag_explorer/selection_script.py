@@ -267,7 +267,7 @@ def build_selections_script(ds: TagDataset, corr: Corrections, times: TimeTable 
     notes.append('The primary header ends with one block of this tool’s keywords, under `/ TIMETAG-EXPLORER KEYWORDS`. '
                  '`TTERAND`, `TTEGEO`, `TTEFLAT`, `TTEVIGN`, `TTEEDGE` say which steps ran (`DONE` or `OMIT`; a step is '
                  '`OMIT` when it was off or could not take effect, such as the vignetting model for an aperture other '
-                 'than F25SRF2), `TTEFFILE` names the flat-field file used, and `TTETSEL` and `TTERSEL` are True when time '
+                 'than F25SRF2), `TTEFFILE` names the flat-field file used, `TTEGFILE` the distortion table (IDC) used, and `TTETSEL` and `TTERSEL` are True when time '
                  'ranges or regions were selected. They are separate from the calibration pipeline’s own keywords '
                  '(`RANDCORR`, `FLATCORR` ...), which are left as they were, so `stistools` is unaffected.')
     notes.append(f'Script version {version}. It is written into the output file’s header (with the package version), so '
@@ -307,7 +307,7 @@ def build_selections_script(ds: TagDataset, corr: Corrections, times: TimeTable 
     add('     the corrected positions and weights.')
     add(f'  3. Writes {output}: the TAG file with those columns added, and the TIMESEL and REGSEL tables that')
     add('     name the bits. The primary header records which steps were done (TTERAND, TTEGEO, TTEFLAT, TTEVIGN,')
-    add('     TTEEDGE), the flat file (TTEFFILE), whether time or space selections were made (TTETSEL, TTERSEL),')
+    add('     TTEEDGE), the flat file (TTEFFILE), the distortion table (TTEGFILE), whether time or space selections were made (TTETSEL, TTERSEL),')
     add('     and the script and package versions.')
     add('"""')
     add('import timetag_explorer')

@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from . import gdcorr
+from .gdcorr import load_geo_lut  # noqa: F401  (re-exported: the geometric-distortion lookup table)
 from .constants import (DETECTOR_LIMITS_X, DETECTOR_LIMITS_Y, EXPOSURE_SUBSAMPLE, MAP_BIN_DEGREES, MAP_SEGMENTS, MAP_SLICE_SECONDS,
                         PLANET_SEGMENTS, RANDOM_SEED, SPATIAL_BIN, _chunks)
 from .frames import (ARCSEC_PER_LOWRES_PIXEL, DETECTOR_CENTRE, FRAMES, Corrections, FrameInfo, frame_label, is_map,
@@ -72,23 +71,7 @@ def build_planet_geometry(info: FrameInfo, positions: np.ndarray) -> PlanetGeome
                           abs(float(np.linalg.det(cd))) * 3600.0 ** 2)
 
 
-# ---- geometric distortion correction (gdcorr.py) as a lookup table --------------------------
-
-@lru_cache(maxsize=1)
-def load_geo_lut():
-    """Distortion offsets (dx, dy) in hi-res pixels at every integer detector pixel.
-
-    gdcorr is a smooth polynomial, so a per-pixel table gives the same answer as
-    evaluating it per event (the offset changes by < 0.01 px across a pixel) at the
-    cost of one gather per event. Built once per process (about half a second).
-    """
-    axis = np.arange(2048, dtype=np.float64)
-    gx, gy = np.meshgrid(axis, axis)  # [row = y, col = x]
-    xc, yc = gdcorr.gdcorr(gx, gy)
-    lut = ((xc - gx).astype(np.float32), (yc - gy).astype(np.float32))
-    for arr in lut:
-        arr.flags.writeable = False
-    return lut
+# ---- geometric distortion correction: the lookup table is built in gdcorr.py (`load_geo_lut(opt_elem)`)
 
 
 # ---- frame transform ------------------------------------------------------------------------------
@@ -207,7 +190,7 @@ def map_coordinates(ds: TagDataset, frame: str, corr: Corrections):
     info, geom = ds.frame_info, ds.planet_geometry()
     base = info.map_base_frame()
     track = ds.planet_track() if is_planet(base) else None
-    geo_lut = load_geo_lut() if corr.geocorr else None
+    geo_lut = load_geo_lut(ds.opt_elem) if corr.geocorr else None
     u, v = frame_coordinates(ds.x, ds.y, ds.time, info, base, corr,
                              seed=RANDOM_SEED, geo_lut=geo_lut, track=track)
     cx, cy = geom.centre(corr)
@@ -278,7 +261,7 @@ def make_frame_grid(ds: TagDataset, frame: str, corr: Corrections) -> FrameGrid:
         return FrameGrid(bin_index, xlo, ylo, nx, ny, binsize=B, keep=keep)
 
     track = ds.planet_track() if is_planet(frame) else None
-    geo_lut = load_geo_lut() if corr.geocorr else None
+    geo_lut = load_geo_lut(ds.opt_elem) if corr.geocorr else None
     u, v = frame_coordinates(ds.x, ds.y, ds.time, ds.frame_info, frame, corr,
                              seed=RANDOM_SEED, geo_lut=geo_lut, track=track)
     xlo = math.floor((float(u.min()) + 0.5) / SPATIAL_BIN) * SPATIAL_BIN - 0.5

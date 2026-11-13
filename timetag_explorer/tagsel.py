@@ -44,7 +44,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.units import UnitsWarning
 
-from . import config
+from . import config, gdcorr
 from .constants import EDGE_TRIM, FLAT_URL, RANDOM_SEED, SELECTION_SCRIPT_VERSION, TIME_DECIMALS
 
 PACKAGE_URL = 'https://github.com/sean-lockwood/timetag-explorer'    # the SELURL of a file made by calling the package directly
@@ -79,7 +79,7 @@ class TagselColumns:
 def _positions(ds: TagDataset, frame: str, corr: Corrections):
     """(x, y) of every event in a frame as the Explorer computes them: 0-indexed hi-res pixels, float32."""
     track = ds.planet_track() if is_planet(frame) else None
-    geo_lut = load_geo_lut() if corr.geocorr else None
+    geo_lut = load_geo_lut(ds.opt_elem) if corr.geocorr else None
     return frame_coordinates(ds.x, ds.y, ds.time, ds.frame_info, frame, corr,
                              seed=RANDOM_SEED, geo_lut=geo_lut, track=track)
 
@@ -398,6 +398,8 @@ def primary_keywords(times: TimeTable, regions: RegionTable, corr: Corrections, 
     keys = [(key, 'DONE' if done[key] else 'OMIT', what[key]) for key in STEP_KEYWORDS]
     if done['TTEFLAT']:
         keys.append(('TTEFFILE', config.FLAT_FILE.name, 'flat-field file used for FLATW'))
+    if done['TTEGEO']:
+        keys.append(('TTEGFILE', gdcorr.idc_file().name, 'IDC table used for the distortion'))
     keys += [('TTETSEL', bool(times), 'time ranges selected: SEL_TIME, TIMESEL'),
              ('TTERSEL', bool(regions), 'regions selected: SEL_REGION, REGSEL')]
     if done['TTERAND']:

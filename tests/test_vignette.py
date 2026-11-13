@@ -87,7 +87,7 @@ for other in ('', '52X0.2', '52X2', 'F28X50LP', 'f25srf2 '):
 real_lut = dataset_module.load_geo_lut
 try:
     shifted = (np.zeros((2048, 2048), np.float32), lut)   # (dx, dy): rows recorded at 28 land on 78
-    dataset_module.load_geo_lut = lambda: shifted
+    dataset_module.load_geo_lut = lambda *args: shifted
     geo_on = replace(on, geocorr=True)
     edges, rate = ds.light_curve(100.0, None, 'image', geo_on)
     assert abs(np.nansum(rate) * 100.0 - (10 / 0.975 + 10 / 0.90 + 10)) < 1e-5, rate

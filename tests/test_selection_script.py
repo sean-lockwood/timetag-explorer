@@ -17,7 +17,7 @@ from timetag_explorer.regions import Box, Circle, Polygon, shift_region
 from timetag_explorer.selections import RegionSelection, RegionTable, Selections, TimeRange, TimeTable, single_selections
 from timetag_explorer.transforms import frame_coordinates
 
-assert tte.SELECTION_SCRIPT_VERSION == '3.2'
+assert tte.SELECTION_SCRIPT_VERSION == '3.3'
 assert tuple(EDGE_TRIM) == (30, 6, 28, 6)
 
 n = 200
@@ -287,7 +287,10 @@ assert list(cols.arrays) == ['SEL_REGION', 'XCORR', 'YCORR', 'XREST', 'YREST'], 
 assert np.array_equal(cols.arrays['XCORR'], exp.x.astype(np.float32)) and np.array_equal(cols.arrays['YCORR'], exp.y.astype(np.float32))
 # geometric distortion alone also gives the corrected pair (the jitter is off, so it differs from AXIS only by the table)
 cols = tagsel.selection_columns(exp, None, None, replace(OFF, geocorr=True))
-assert 'XCORR' in cols.arrays and np.allclose(cols.arrays['XCORR'], exp.x)                          # (zero offsets for now)
+lut_x, lut_y = tagsel.load_geo_lut(exp.opt_elem)
+at = (exp.y.astype(int) - 1, exp.x.astype(int) - 1)                                                 # (0-indexed row, column)
+assert np.allclose(cols.arrays['XCORR'], exp.x + lut_x[at], atol=1e-4) and np.allclose(cols.arrays['YCORR'], exp.y + lut_y[at], atol=1e-4)
+assert not np.allclose(cols.arrays['XCORR'], exp.x)                                                  # a real correction
 # a rest frame with no slew is the image frame
 still = dataset(t, xs, ys); cols = tagsel.selection_columns(still, None, None, on)
 assert np.array_equal(cols.arrays['XREST'], cols.arrays['XCORR']) and np.array_equal(cols.arrays['YREST'], cols.arrays['YCORR'])
@@ -415,9 +418,10 @@ for key, value, comment in cards:
     assert width + (3 + len(comment) if comment else 0) <= 80 or isinstance(value, str) and len(value) > 40, (key, width, comment)
 h = header(one_time, None, OFF)
 assert h['TTETSEL'] is True and h['TTERSEL'] is False
-assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['OMIT'] * 6 and 'RANDSEED' not in h and 'SELEDGEL' not in h and 'TTEFFILE' not in h
+assert [h[k] for k in tagsel.STEP_KEYWORDS] == ['OMIT'] * 6 and 'RANDSEED' not in h and 'SELEDGEL' not in h and 'TTEFFILE' not in h and 'TTEGFILE' not in h
 h = header(None, None, replace(OFF, geocorr=True))
 assert h['TTETSEL'] is False and h['TTERSEL'] is False and h['TTEGEO'] == 'DONE' and h['TTERAND'] == 'OMIT'
+assert h['TTEGFILE'] == '1771408ro_idc.fits' and list(h).index('TTEGFILE') < list(h).index('TTETSEL')    # which IDC table
 # a step is DONE only if it took effect: no flat found, or a vignetting model for another aperture
 h = header(None, None, on, noflat)
 assert h['TTEFLAT'] == 'OMIT' and 'TTEFFILE' not in h

@@ -13,7 +13,17 @@ How the numbers move:
 Every change that can alter a computed number says so here, in plain words, so that a published result can be traced
 to the version that made it.
 
-## [1.9.0] - Unreleased
+## [1.10.0] - Unreleased
+
+**The geometric distortion correction is real (selection script 3.3). Corrected positions move by up to about 16 hi-res pixels in x and 8 in y; every result that used them can change.**
+
+* `gdcorr` evaluates the STIS image-distortion table `1771408ro_idc.fits` (IDCTAB; the FORWARD rows, observed to true position), as defined in the table header, the CDBS description and STIS ISR 2018-02 (the coefficients equal that report's Table 3). The table ships with the package (`timetag_explorer/data/`); a published copy is at https://www.planetarylightshow.com/static/data/1771408ro_idc.fits, and the environment variable `TAG_EXPLORER_IDC` names another table to use instead.
+* The table is for low-resolution pixels (1024 x 1024), so the correction is worked out at each hi-res pixel's low-res position (hi-res pixel *i*, counted from 0, is low-res pixel *i*/2 + 0.75 counted from 1), measured from the table's `XREF`, `YREF` (512, 512) and converted to arcseconds with `SCALE`; the offset it gives is then doubled for hi-res pixels. It includes the part that only rectifies the pixel scale (the polynomial is in arcseconds), not just the non-linear part, which is about 3 low-res pixels at most.
+* The row is chosen by the exposure's `OPT_ELEM` (`TagDataset.opt_elem`; MIRFUV if there is no exact match). The two rows share their coefficients but not `SCALE` (0.024395 for MIRCUV, 0.024468 for MIRFUV), so the corrections differ by about 0.3% of the distance from the centre.
+* The geometric step is **on by default** whenever the table can be found. The primary header gets `TTEGFILE`, the table used, when the step was done.
+* Not changed: `frames.ARCSEC_PER_LOWRES_PIXEL` (used to turn the commanded slew into pixels) is still the MIRFUV value, 0.3% off for MIRCUV exposures.
+
+## [1.9.0] - Released
 
 **Planet-map coordinates in the `_tagsel.fits` file (selection script 3.2, experimental), and a new default emission altitude. A planet-map result changes with the altitude; nothing else does.**
 

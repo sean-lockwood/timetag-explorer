@@ -9,3 +9,4 @@ dist/
 horizons/
 selection_test/
 docs/_build/
+!timetag_explorer/data/*.fits
