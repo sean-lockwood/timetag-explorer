@@ -19,6 +19,9 @@ def _env_path(name: str, default: str) -> Path:
 
 # The flat field: a 2048 x 2048 image of multiplicative weights (optional: without it, counts are unweighted).
 FLAT_FILE = _env_path('TAG_EXPLORER_FLAT', 'combined_flat.fits')
+# The STIS FUV-MAMA IDC table for the geometric distortion correction (optional: the package ships with
+# 1771408ro_idc.fits; set this to use another one).
+IDC_FILE = Path(os.environ['TAG_EXPLORER_IDC']) if os.environ.get('TAG_EXPLORER_IDC') else None
 # Where the JPL Horizons ephemerides are saved and reused (one small CSV per exposure and body).
 HORIZONS_DIR = _env_path('TAG_EXPLORER_HORIZONS', 'horizons')
 # Web address of the tool that is written into generated scripts and FITS headers (empty: the default address).

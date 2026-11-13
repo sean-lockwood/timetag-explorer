@@ -208,7 +208,7 @@ def reference_columns(te, ds, order, case, times, regions, north_up=False):
             lo, hi = np.searchsorted(ds.time, (row.start, row.stop))
             bits[lo:hi] |= np.uint16(1 << row.bit)
         flags['SEL_TIME'] = bits
-    geo_lut = te.load_geo_lut() if geo else None
+    geo_lut = te.load_geo_lut(ds.opt_elem) if geo else None
     xy = lambda f: te.frame_coordinates(ds.x, ds.y, ds.time, ds.frame_info, f, corr, seed=te.RANDOM_SEED,
                                         geo_lut=geo_lut, track=ds.planet_track() if f in PLANET_FRAMES else None)
     used = regions.used_frames if regions else ()
@@ -386,7 +386,8 @@ def check_output(te, fits, ds, case, times, regions, expected, tag_path, folder,
         block = [] if at is None else [c.keyword for c in cards[at + 1:]]
         checks += [(bool(block) and block[0] == 'TTERAND', f'the "{label}" label card, then TTERAND first (got {block[:1]})'),
                    (not {'TIMESEL', 'SPCSEL'} & set(header), 'TIMESEL / SPCSEL must not be written'),
-                   ((header.get('TTEFFILE') == 'combined_flat.fits') == done['TTEFLAT'], f'TTEFFILE {header.get("TTEFFILE")!r}')]
+                   ((header.get('TTEFFILE') == 'combined_flat.fits') == done['TTEFLAT'], f'TTEFFILE {header.get("TTEFFILE")!r}'),
+                   ((header.get('TTEGFILE') == '1771408ro_idc.fits') == done['TTEGEO'], f'TTEGFILE {header.get("TTEGFILE")!r}')]
         checks += [(header.get('TTETSEL') is bool(times), f'TTETSEL {header.get("TTETSEL")!r}'),
                    (header.get('TTERSEL') is bool(regions), f'TTERSEL {header.get("TTERSEL")!r}'),
                    (not {'SELTMIN', 'SELTMAX', 'SELREG', 'SELFRAME'} & set(header), 'SELTMIN / SELTMAX / SELREG / SELFRAME must not be written'),

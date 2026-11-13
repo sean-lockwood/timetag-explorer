@@ -46,3 +46,6 @@ version = { attr = "timetag_explorer.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["timetag_explorer*"]
+
+[tool.setuptools.package-data]
+timetag_explorer = ["data/*.fits"]

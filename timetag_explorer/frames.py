@@ -20,8 +20,9 @@ from .planet import BODIES
 # --------------------------------------------------------------------------
 
 def geocorr_available() -> bool:
-    """False while gdcorr.py holds placeholder coefficients: the correction would change nothing, so it is left off."""
-    return not gdcorr.PLACEHOLDER
+    """Whether the IDC table for the geometric distortion correction can be found (it ships with the package, so
+    this is False only if `config.IDC_FILE` points at a file that is not there)."""
+    return gdcorr.idc_file().is_file()
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,7 @@ class Corrections:
     """Processing steps the user can switch on and off (hashable: used in cache keys)."""
 
     randcorr: bool = True   # +/-0.5 hi-res-pixel random jitter of each event position
-    geocorr: bool = True    # geometric distortion correction (gdcorr.py, via a lookup table)
+    geocorr: bool = True    # geometric distortion correction (gdcorr.py: the STIS IDC table, via a lookup table)
     flatcorr: bool = True   # flat-field weights
     timecorr: bool = True   # divide by the time each frame pixel was actually on the detector
     # EXPERIMENTAL (vignette.py), off by default, F25SRF2 only: linear sensitivity ramps towards the bottom and the top
@@ -60,7 +61,7 @@ class Corrections:
         return (self.centre_dx, self.centre_dy, self.altitude_km)
 
 
-# geocorr is off (and its switch disabled) while gdcorr.py holds placeholder coefficients.
+# geocorr is on by default (off, and its switch disabled, only if the IDC table cannot be found).
 DEFAULT_CORRECTIONS = Corrections(geocorr=geocorr_available())
 
 FRAMES = {

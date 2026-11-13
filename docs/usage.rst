@@ -40,7 +40,7 @@ The columns added are:
 
 The primary header records what was done, in one block under the label ``/ TIMETAG-EXPLORER KEYWORDS``: which steps
 ran (``TTERAND``, ``TTEGEO``, ``TTEFLAT``, ``TTEVIGN``, ``TTEEDGE``, ``TTEMAP``: ``DONE`` or ``OMIT``), the flat-field file used
-(``TTEFFILE``), and whether a time or space selection was made (``TTETSEL``, ``TTERSEL``). These names are deliberately
+(``TTEFFILE``), the geometric distortion table used (``TTEGFILE``), and whether a time or space selection was made (``TTETSEL``, ``TTERSEL``). These names are deliberately
 not the calibration pipeline's step keywords (``RANDCORR``, ``FLATCORR`` and so on, whose ``PERFORM`` means something
 else to ``calstis`` and ``stistools``), which are left as they were.
 
@@ -127,7 +127,7 @@ Module                     Contents
 ``selection_script``       the generator of selection scripts (and its version, ``SELVER``)
 ``selections``             named time ranges and regions: bits, names, expressions, the ``TIMESEL`` / ``REGSEL`` rows
 ``tagsel``                 what a selection script runs: flags, corrected positions, weights and selection tables in ``_tagsel.fits``
-``gdcorr``                 the geometric distortion polynomial (placeholder coefficients for now)
+``gdcorr``                 the geometric distortion polynomial (the STIS IDC table, read from the file bundled with the package)
 ``vignette``               the experimental vignetting model (F25SRF2 only; off by default)
 ``constants``, ``config``  shared numbers; file locations; logging
 =========================  ==================================================================================

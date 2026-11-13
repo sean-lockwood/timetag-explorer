@@ -70,6 +70,7 @@ class TagDataset:
     texptime: float | None = None
     propaper: str = ''     # proposed aperture / filter
     aperture: str = ''     # aperture actually used (APERTURE in the primary header)
+    opt_elem: str = ''     # optical element (OPT_ELEM): selects the geometric-distortion row
     _grids: OrderedDict = field(default_factory=OrderedDict, init=False, repr=False)
     _expo: OrderedDict = field(default_factory=OrderedDict, init=False, repr=False)
     _track: PlanetTrack | None = field(default=None, init=False, repr=False)
@@ -166,7 +167,7 @@ class TagDataset:
                 self._expo.move_to_end(key)
                 return emap
         track = self.planet_track() if is_planet(frame) else None
-        geo_lut = load_geo_lut() if corr.geocorr else None
+        geo_lut = load_geo_lut(self.opt_elem) if corr.geocorr else None
         emap = compute_exposure_map(self, grid, frame, window, track, geo_lut)
         emap.flags.writeable = False
         with self._lock:
@@ -211,7 +212,7 @@ class TagDataset:
             return None
         hi = len(self.time) if hi is None else hi
         bottom, top = corr.vignette_ramps()
-        y_offset = load_geo_lut()[1] if corr.geocorr else None
+        y_offset = load_geo_lut(self.opt_elem)[1] if corr.geocorr else None
         return event_gain(self.x[lo:hi], self.y[lo:hi], bottom, top, y_offset)
 
     def _event_weights(self, corr: Corrections, lo: int, hi: int) -> np.ndarray | None:
@@ -258,7 +259,7 @@ class TagDataset:
         with self._lock:
             if self._knots is None or self._knots[0] != knots_key:
                 track = self.planet_track() if is_planet(self.frame_info.map_base_frame()) else None
-                geo_lut = load_geo_lut() if corr.geocorr else None
+                geo_lut = load_geo_lut(self.opt_elem) if corr.geocorr else None
                 self._knots = (knots_key, map_knots(self, grid, frame, corr, track, geo_lut))
             knots = self._knots[1]
         with np.errstate(invalid='ignore', over='ignore'):  # inf - inf in the interval arithmetic is harmless
@@ -538,6 +539,7 @@ def _load_dataset_uncached(path: str) -> TagDataset:
         texptime=_as_float(header.get('TEXPTIME')),
         propaper=str(header.get('PROPAPER', '')).strip(),
         aperture=str(header.get('APERTURE', '')).strip(),
+        opt_elem=str(header.get('OPT_ELEM', '')).strip(),
     )
 
 

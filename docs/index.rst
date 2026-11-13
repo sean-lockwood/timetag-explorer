@@ -13,8 +13,8 @@ the app computes about the data comes from here, so this is the part that scient
 
    First releases, not yet validated. The
    `validation table <https://github.com/sean-lockwood/timetag-explorer/blob/main/VALIDATION.md>`_ lists each step with
-   its reference and review status. The geometric distortion correction is **disabled**: the coefficients in
-   :mod:`timetag_explorer.gdcorr` are placeholders (all zero) until values from a public reference file replace them.
+   its reference and review status. The geometric distortion correction uses the STIS IDC table ``1771408ro_idc.fits``
+   (bundled with the package; see :mod:`timetag_explorer.gdcorr`), adapted to the 2048 x 2048 hi-res pixel grid.
 
 .. toctree::
    :maxdepth: 2

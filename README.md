@@ -14,8 +14,8 @@ this package knows nothing about it. Everything the app computes about the data 
 that scientific review should look at.
 
 > **Status: first release, not yet validated.** [VALIDATION.md](https://github.com/sean-lockwood/timetag-explorer/blob/main/VALIDATION.md) lists each step with its reference and
-> its review status. The geometric distortion correction is **disabled** in this release: `gdcorr.py` holds
-> placeholder (zero) coefficients until values from a public reference file replace them.
+> its review status. The geometric distortion correction uses the STIS IDC table `1771408ro_idc.fits` (bundled with the
+> package; see `gdcorr.py`), adapted to the 2048 x 2048 hi-res pixel grid.
 
 ## Install
 
@@ -72,7 +72,7 @@ package version to install (see `CHANGELOG.md`).
 | `selections` | named time ranges and regions: bits, names, expressions (`oval - io`), the `TIMESEL` / `REGSEL` table rows |
 | `selection_script` | the generator of selection scripts (and its version, `SELVER`) |
 | `tagsel` | what a selection script runs: the flags, corrected positions, weights and selection tables it writes into `_tagsel.fits` |
-| `gdcorr` | the geometric distortion polynomial (placeholder coefficients for now) |
+| `gdcorr` | the geometric distortion polynomial (the STIS IDC table, bundled with the package) |
 | `vignette` | the experimental vignetting model (two sensitivity ramps; F25SRF2 only; off by default) |
 | `constants`, `config`, `log` | shared numbers; file locations; logging |
 
